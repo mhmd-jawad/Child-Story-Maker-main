@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Story Garden</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <script defer src="app.js"></script>
+  </head>
+  <body>
+    <div class="orb orb-a"></div>
+    <div class="orb orb-b"></div>
+    <div class="orb orb-c"></div>
+
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark"></span>
+        Story Garden
+      </div>
+      <div class="top-actions">
+        <button id="profilesBtn" class="ghost hidden">Child profiles</button>
+        <div id="userBadge" class="user-badge hidden"></div>
+        <button id="logoutBtn" class="ghost hidden">Log out</button>
+      </div>
+    </header>
+
+    <main class="shell">
+      <section id="authView" class="view">
+        <div class="auth-card">
+          <div class="auth-hero">
+            <div class="eyebrow">Welcome</div>
+            <h1>Build stories your kids will love.</h1>
+            <p>
+              Create an account, add your child profiles, and craft personalized,
+              illustrated stories in minutes.
+            </p>
+          </div>
+          <div class="auth-panel">
+            <div class="auth-tabs">
+              <button class="tab active" data-tab="login">Sign in</button>
+              <button class="tab" data-tab="register">Create account</button>
+            </div>
+            <form id="loginForm" class="auth-form">
+              <label>Email</label>
+              <input type="email" name="email" placeholder="parent@email.com" required />
+              <label>Password</label>
+              <input type="password" name="password" placeholder="Your password" required />
+              <button type="submit" class="primary">Sign in</button>
+            </form>
+            <form id="registerForm" class="auth-form hidden">
+              <label>Email</label>
+              <input type="email" name="email" placeholder="parent@email.com" required />
+              <label>Password</label>
+              <input type="password" name="password" placeholder="Choose a password" required />
+              <button type="submit" class="primary">Create account</button>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <section id="childView" class="view hidden">
+        <div class="section-head">
+          <div>
+            <h2>Choose a child profile</h2>
+            <p>Stories are tailored to each child with their name, age, and interests.</p>
+          </div>
+          <button id="toStudioBtn" class="ghost hidden">Go to story studio</button>
+        </div>
+        <div id="childGrid" class="child-grid"></div>
+        <div class="child-panel">
+          <h3>Add a new child</h3>
+          <form id="childForm" class="child-form">
+            <div class="form-row">
+              <div>
+                <label>Child name</label>
+                <input type="text" name="name" placeholder="Maya" required />
+              </div>
+              <div>
+                <label>Age</label>
+                <input type="number" name="age" min="2" max="12" value="6" required />
+              </div>
+            </div>
+            <label>Interests</label>
+            <input
+              type="text"
+              name="interests"
+              placeholder="space, animals, puzzles"
+              required
+            />
+            <button type="submit" class="primary">Create profile</button>
+          </form>
+        </div>
+      </section>
+
+      <section id="studioView" class="view hidden">
+        <div class="section-head">
+          <div>
+            <h2>Story studio</h2>
+            <p>Craft a story that sounds like it was made just for them.</p>
+          </div>
+          <div class="active-child" id="activeChildBadge"></div>
+        </div>
+
+        <div class="studio-grid">
+          <div class="card builder">
+            <form id="storyForm">
+              <label>Story idea</label>
+              <textarea
+                name="prompt"
+                placeholder="A brave cat who wants to touch the moon."
+                rows="4"
+                required
+              ></textarea>
+
+              <label>Title (optional)</label>
+              <input type="text" name="title" placeholder="Luna and the Moon Ladder" />
+
+              <div class="form-row">
+                <div>
+                  <label>Language</label>
+                  <select name="language">
+                    <option>English</option>
+                    <option>Arabic</option>
+                    <option>French</option>
+                  </select>
+                </div>
+                <div>
+                  <label>Style</label>
+                  <select name="style">
+                    <option>Cozy bedtime</option>
+                    <option>Adventure</option>
+                    <option>Funny</option>
+                    <option>Mystery (gentle)</option>
+                    <option>Fantasy</option>
+                    <option>Sci-Fi (kid-safe)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div>
+                  <label>Image style</label>
+                  <select name="image_style">
+                    <option>Watercolor</option>
+                    <option>Cartoon</option>
+                    <option>Crayon</option>
+                    <option>Paper-cut</option>
+                    <option>Clay</option>
+                  </select>
+                </div>
+                <div>
+                  <label>Chapters</label>
+                  <input type="range" name="chapters" min="1" max="8" value="4" />
+                  <div class="range-value" id="chaptersValue">4</div>
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div>
+                  <label>Character traits</label>
+                  <input type="text" name="traits" placeholder="curious, kind" />
+                </div>
+                <div>
+                  <label>Setting</label>
+                  <input type="text" name="setting" placeholder="small seaside town" />
+                </div>
+              </div>
+
+              <label class="checkbox">
+                <input type="checkbox" name="generate_images" checked />
+                Generate illustrations
+              </label>
+
+              <button type="submit" class="primary">Generate story</button>
+            </form>
+          </div>
+
+          <div class="card results">
+            <div class="results-head">
+              <div>
+                <h3>Story output</h3>
+                <p id="storyStatus">Waiting for your idea.</p>
+              </div>
+              <div class="results-actions">
+                <button id="downloadZipBtn" class="ghost hidden">Download ZIP</button>
+                <button id="downloadPdfBtn" class="ghost hidden">Download PDF</button>
+                <button id="regenImagesBtn" class="ghost hidden">Generate images</button>
+              </div>
+            </div>
+            <div id="storyOutput" class="story-output"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast hidden"></div>
+  </body>
+</html>
