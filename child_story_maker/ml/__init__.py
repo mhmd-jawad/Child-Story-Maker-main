@@ -1,2 +1,0 @@
-"""ML utilities (embeddings + similarity)."""
-
