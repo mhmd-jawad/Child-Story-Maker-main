@@ -3,6 +3,7 @@ import os
 import uuid
 from typing import Optional, List, Dict, Any
 
+import httpx
 from dotenv import load_dotenv
 
 from ..common.paths import repo_root
@@ -25,6 +26,7 @@ from .storage.files import (
     save_image_bytes,
     save_audio_bytes,
 )
+from .storage import supabase_db
 from .services.tts import synthesize_tts
 from .exports import export_zip, export_pdf
 from child_story_maker.common.db import (
@@ -111,6 +113,7 @@ class CreateStoryReq(BaseModel):
     image_size: str = Field(default="512x512", pattern=r"^(auto|\d{2,4}x\d{2,4})$")
     image_style: Optional[str] = Field(default=None, max_length=40)
     title: str = Field(default="")
+    child_id: Optional[str] = Field(default=None, max_length=64)
     model_config = ConfigDict(extra="forbid")
 
 
@@ -168,6 +171,14 @@ def _require_parent_id(request: Request) -> int:
     if not parent_id:
         raise HTTPException(status_code=401, detail="Unauthorized")
     return parent_id
+
+
+def _require_bearer_token(request: Request) -> str:
+    auth = request.headers.get("authorization", "")
+    parts = auth.split()
+    if len(parts) == 2 and parts[0].lower() == "bearer" and parts[1].strip():
+        return parts[1].strip()
+    raise HTTPException(status_code=401, detail="Unauthorized")
 
 # -------------------------------
 # Routes
@@ -251,13 +262,15 @@ def delete_child(child_id: int, parent_id: int = Depends(_require_parent_id)):
 
 
 @app.post("/story", response_model=StoryResp)
-async def create_story(req: CreateStoryReq):
+async def create_story(req: CreateStoryReq, request: Request):
     """
     Create a story (and optionally its images).
     """
     ok, err = kid_safe_prompt(req.prompt)
     if not ok:
         raise HTTPException(status_code=400, detail=err)
+    use_supabase = (not USE_LOCAL_DB) and supabase_db.enabled()
+    token: Optional[str] = _require_bearer_token(request) if use_supabase else None
     try:
         story = await generate_story_core(
             prompt=req.prompt,
@@ -269,8 +282,6 @@ async def create_story(req: CreateStoryReq):
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Story provider error: {e}")
-
-    story_id = f"st_{uuid.uuid4().hex[:8]}"
 
     try:
         # Normalize sections for the UI layer
@@ -288,17 +299,38 @@ async def create_story(req: CreateStoryReq):
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Story response invalid: {e}")
 
-    DB[story_id] = {
-        "title": req.title.strip() or story["title"],
-        "sections": norm_sections,
-        "status": "ready",
-        "age_group": req.age,
-        "language": req.language,
-        "style": req.style or "default",
-    }
+    if use_supabase:
+        try:
+            story_id = await supabase_db.create_story(
+                token=token or "",
+                title=req.title.strip() or story["title"],
+                prompt=req.prompt,
+                age_group=req.age,
+                language=req.language,
+                style=req.style or "default",
+                child_id=req.child_id,
+                sections=norm_sections,
+            )
+        except httpx.HTTPError as e:
+            raise HTTPException(status_code=502, detail=f"Supabase error: {e}") from e
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Supabase error: {e}") from e
+        status = "ready"
+    else:
+        story_id = f"st_{uuid.uuid4().hex[:8]}"
+        DB[story_id] = {
+            "title": req.title.strip() or story["title"],
+            "sections": norm_sections,
+            "status": "ready",
+            "age_group": req.age,
+            "language": req.language,
+            "style": req.style or "default",
+        }
+        status = "ready"
 
     if req.generate_images:
-        DB[story_id]["status"] = "generating-images"
+        if not use_supabase:
+            DB[story_id]["status"] = "generating-images"
         try:
             for s in norm_sections:
                 prompt = s["image_prompt"]
@@ -306,21 +338,43 @@ async def create_story(req: CreateStoryReq):
                     prompt = f"{prompt}. Style: {req.image_style}."
                 img_bytes = await generate_image_core(prompt, size=req.image_size)
                 s["image_url"] = save_image_bytes(story_id, s["id"], img_bytes)
+                if use_supabase:
+                    await supabase_db.update_section(
+                        token=token or "",
+                        story_id=story_id,
+                        idx=int(s["id"]),
+                        image_url=s["image_url"],
+                    )
         except Exception as e:
-            DB[story_id]["status"] = "ready"  # fail soft; client can retry images
+            if not use_supabase:
+                DB[story_id]["status"] = "ready"  # fail soft; client can retry images
             raise HTTPException(status_code=502, detail=f"Image provider error: {e}")
-        DB[story_id]["status"] = "ready"
+        if not use_supabase:
+            DB[story_id]["status"] = "ready"
 
     return {
         "story_id": story_id,
-        "title": DB[story_id]["title"],
-        "sections": DB[story_id]["sections"],
-        "status": DB[story_id]["status"],
+        "title": (DB[story_id]["title"] if not use_supabase else (req.title.strip() or story["title"])),
+        "sections": (DB[story_id]["sections"] if not use_supabase else norm_sections),
+        "status": (DB[story_id]["status"] if not use_supabase else status),
     }
 
 
 @app.get("/story/{story_id}", response_model=StoryResp)
-def get_story(story_id: str):
+async def get_story(story_id: str, request: Request):
+    use_supabase = (not USE_LOCAL_DB) and supabase_db.enabled()
+    if use_supabase:
+        token = _require_bearer_token(request)
+        data = await supabase_db.get_story(token=token, story_id=story_id)
+        if not data:
+            raise HTTPException(status_code=404, detail="Story not found")
+        return {
+            "story_id": story_id,
+            "title": data["title"],
+            "sections": data["sections"],
+            "status": data["status"],
+        }
+
     data = DB.get(story_id)
     if not data:
         raise HTTPException(status_code=404, detail="Story not found")
@@ -333,10 +387,18 @@ def get_story(story_id: str):
 
 
 @app.get("/story/{story_id}/export/zip")
-def export_story_zip(story_id: str):
-    data = DB.get(story_id)
-    if not data:
-        raise HTTPException(status_code=404, detail="Story not found")
+async def export_story_zip(story_id: str, request: Request):
+    use_supabase = (not USE_LOCAL_DB) and supabase_db.enabled()
+    if use_supabase:
+        token = _require_bearer_token(request)
+        data = await supabase_db.get_story(token=token, story_id=story_id)
+        if not data:
+            raise HTTPException(status_code=404, detail="Story not found")
+    else:
+        data = DB.get(story_id)
+        if not data:
+            raise HTTPException(status_code=404, detail="Story not found")
+
     zip_bytes = export_zip(story_id, data)
     filename = f"{data.get('title', 'story').replace(' ', '_').lower()}_story.zip"
     return Response(
@@ -347,10 +409,18 @@ def export_story_zip(story_id: str):
 
 
 @app.get("/story/{story_id}/export/pdf")
-def export_story_pdf(story_id: str):
-    data = DB.get(story_id)
-    if not data:
-        raise HTTPException(status_code=404, detail="Story not found")
+async def export_story_pdf(story_id: str, request: Request):
+    use_supabase = (not USE_LOCAL_DB) and supabase_db.enabled()
+    if use_supabase:
+        token = _require_bearer_token(request)
+        data = await supabase_db.get_story(token=token, story_id=story_id)
+        if not data:
+            raise HTTPException(status_code=404, detail="Story not found")
+    else:
+        data = DB.get(story_id)
+        if not data:
+            raise HTTPException(status_code=404, detail="Story not found")
+
     pdf_bytes = export_pdf(story_id, data)
     filename = f"{data.get('title', 'story').replace(' ', '_').lower()}.pdf"
     return Response(
@@ -361,15 +431,21 @@ def export_story_pdf(story_id: str):
 
 
 @app.post("/story/{story_id}/images", response_model=StoryResp)
-async def generate_images(story_id: str, req: ImagesReq):
+async def generate_images(story_id: str, req: ImagesReq, request: Request):
     """
     (Re)generate images for each section.
     """
-    d = DB.get(story_id)
-    if not d:
-        raise HTTPException(status_code=404, detail="Story not found")
-
-    d["status"] = "generating-images"
+    use_supabase = (not USE_LOCAL_DB) and supabase_db.enabled()
+    token: Optional[str] = _require_bearer_token(request) if use_supabase else None
+    if use_supabase:
+        d = await supabase_db.get_story(token=token or "", story_id=story_id)
+        if not d:
+            raise HTTPException(status_code=404, detail="Story not found")
+    else:
+        d = DB.get(story_id)
+        if not d:
+            raise HTTPException(status_code=404, detail="Story not found")
+        d["status"] = "generating-images"
     try:
         for s in d["sections"]:
             prompt = s["image_prompt"]
@@ -377,17 +453,70 @@ async def generate_images(story_id: str, req: ImagesReq):
                 prompt = f"{prompt}. Style: {req.image_style}."
             img_bytes = await generate_image_core(prompt, size=req.size)
             s["image_url"] = save_image_bytes(story_id, s["id"], img_bytes)
+            if use_supabase:
+                await supabase_db.update_section(
+                    token=token or "",
+                    story_id=story_id,
+                    idx=int(s["id"]),
+                    image_url=s["image_url"],
+                )
     except Exception as e:
-        d["status"] = "ready"
+        if not use_supabase:
+            d["status"] = "ready"
         raise HTTPException(status_code=502, detail=f"Image provider error: {e}")
 
-    d["status"] = "ready"
+    if not use_supabase:
+        d["status"] = "ready"
     return {
         "story_id": story_id,
         "title": d["title"],
         "sections": d["sections"],
-        "status": d["status"],
+        "status": "ready",
     }
+
+
+@app.post("/story/{story_id}/sections/{section_id}/image", response_model=SectionResp)
+async def generate_section_image(
+    story_id: str, section_id: int, req: ImagesReq, request: Request
+):
+    """
+    Generate (or regenerate) a single section image.
+    Useful for serverless deployments to avoid long-running requests.
+    """
+    use_supabase = (not USE_LOCAL_DB) and supabase_db.enabled()
+    token: Optional[str] = _require_bearer_token(request) if use_supabase else None
+
+    if use_supabase:
+        section = await supabase_db.get_section(token=token or "", story_id=story_id, idx=section_id)
+        if not section:
+            raise HTTPException(status_code=404, detail="Section not found")
+    else:
+        story = DB.get(story_id)
+        if not story:
+            raise HTTPException(status_code=404, detail="Story not found")
+        section = next((s for s in story["sections"] if int(s["id"]) == int(section_id)), None)
+        if not section:
+            raise HTTPException(status_code=404, detail="Section not found")
+
+    prompt = section["image_prompt"]
+    if req.image_style:
+        prompt = f"{prompt}. Style: {req.image_style}."
+    try:
+        img_bytes = await generate_image_core(prompt, size=req.size)
+        image_url = save_image_bytes(story_id, int(section_id), img_bytes)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Image provider error: {e}")
+
+    section["image_url"] = image_url
+    if use_supabase:
+        await supabase_db.update_section(
+            token=token or "",
+            story_id=story_id,
+            idx=int(section_id),
+            image_url=image_url,
+        )
+
+    return section
 
 
 # Serve the web UI
@@ -421,15 +550,21 @@ async def generate_image(req: ImageReq):
 
 
 @app.post("/story/{story_id}/tts", response_model=StoryResp)
-async def generate_tts(story_id: str, req: TTSReq):
+async def generate_tts(story_id: str, req: TTSReq, request: Request):
     """
     Generate audio for each section and return updated story.
     """
-    d = DB.get(story_id)
-    if not d:
-        raise HTTPException(status_code=404, detail="Story not found")
-
-    d["status"] = "generating-audio"
+    use_supabase = (not USE_LOCAL_DB) and supabase_db.enabled()
+    token: Optional[str] = _require_bearer_token(request) if use_supabase else None
+    if use_supabase:
+        d = await supabase_db.get_story(token=token or "", story_id=story_id)
+        if not d:
+            raise HTTPException(status_code=404, detail="Story not found")
+    else:
+        d = DB.get(story_id)
+        if not d:
+            raise HTTPException(status_code=404, detail="Story not found")
+        d["status"] = "generating-audio"
     try:
         for s in d["sections"]:
             audio_bytes = await synthesize_tts(
@@ -438,14 +573,23 @@ async def generate_tts(story_id: str, req: TTSReq):
             s["audio_url"] = save_audio_bytes(
                 story_id, s["id"], audio_bytes, ext=req.format
             )
+            if use_supabase:
+                await supabase_db.update_section(
+                    token=token or "",
+                    story_id=story_id,
+                    idx=int(s["id"]),
+                    audio_url=s["audio_url"],
+                )
     except Exception as e:
-        d["status"] = "ready"
+        if not use_supabase:
+            d["status"] = "ready"
         raise HTTPException(status_code=502, detail=f"TTS provider error: {e}")
 
-    d["status"] = "ready"
+    if not use_supabase:
+        d["status"] = "ready"
     return {
         "story_id": story_id,
         "title": d["title"],
         "sections": d["sections"],
-        "status": d["status"],
+        "status": "ready",
     }

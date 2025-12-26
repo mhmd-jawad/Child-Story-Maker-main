@@ -3,19 +3,18 @@
   "builds": [
     {
       "src": "api/[...path].py",
-      "use": "@vercel/python"
+      "use": "@vercel/python",
+      "config": {
+        "maxDuration": 60
+      }
     },
     {
       "src": "web/**",
       "use": "@vercel/static"
     }
   ],
-  "functions": {
-    "api/[...path].py": {
-      "maxDuration": 60
-    }
-  },
   "routes": [
+    { "src": "/api/(.*)", "dest": "/api/[...path].py" },
     { "handle": "filesystem" },
     { "src": "/(.*)", "dest": "/web/$1" }
   ]

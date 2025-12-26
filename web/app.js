@@ -79,17 +79,30 @@ function setAuthUI(loggedIn) {
   }
 }
 
-function authHeaders() {
-  const headers = { "Content-Type": "application/json" };
-  if (!USE_SUPABASE && state.token) {
-    headers.Authorization = `Bearer ${state.token}`;
+async function bearerToken() {
+  if (USE_SUPABASE) {
+    const { data, error } = await supabaseClient.auth.getSession();
+    if (error) return "";
+    return data.session?.access_token || "";
   }
+  return state.token || "";
+}
+
+async function authHeaders({ json = true } = {}) {
+  const headers = {};
+  if (json) headers["Content-Type"] = "application/json";
+  const token = await bearerToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
   return headers;
 }
 
 async function api(path, options = {}) {
+  const headers = {
+    ...(await authHeaders({ json: true })),
+    ...(options.headers || {}),
+  };
   const resp = await fetch(apiUrl(path), {
-    headers: authHeaders(),
+    headers,
     ...options,
   });
   if (!resp.ok) {
@@ -273,6 +286,27 @@ async function generateStory(payload) {
   renderStory(story);
 }
 
+async function generateImagesPerSection(storyId, size, imageStyle) {
+  if (!state.story) return;
+  const sections = state.story.sections || [];
+  if (sections.length === 0) return;
+  for (let i = 0; i < sections.length; i += 1) {
+    const section = sections[i];
+    if (section.image_url) continue;
+    storyStatus.textContent = `Generating images (${i + 1}/${sections.length})...`;
+    const updated = await api(`/story/${storyId}/sections/${section.id}/image`, {
+      method: "POST",
+      body: JSON.stringify({ size, image_style: imageStyle }),
+    });
+    const idx = state.story.sections.findIndex((s) => s.id === updated.id);
+    if (idx >= 0) {
+      state.story.sections[idx] = { ...state.story.sections[idx], ...updated };
+    }
+    renderStory(state.story);
+  }
+  storyStatus.textContent = state.story.title || "Story";
+}
+
 function renderStory(story) {
   if (!story) return;
   storyStatus.textContent = story.title || "Story";
@@ -439,6 +473,7 @@ storyForm.addEventListener("submit", async (event) => {
   const basePrompt = formData.get("prompt");
   const traits = formData.get("traits");
   const setting = formData.get("setting");
+  const wantImages = Boolean(formData.get("generate_images"));
 
   const payload = {
     prompt: buildPrompt(basePrompt, child, traits, setting),
@@ -447,13 +482,21 @@ storyForm.addEventListener("submit", async (event) => {
     language: formData.get("language"),
     style: formData.get("style"),
     title: formData.get("title") || "",
-    generate_images: Boolean(formData.get("generate_images")),
+    child_id: String(child.id),
+    generate_images: false,
     image_style: formData.get("image_style"),
     image_size: "512x512",
   };
 
   try {
     await generateStory(payload);
+    if (wantImages && state.story?.story_id) {
+      await generateImagesPerSection(
+        state.story.story_id,
+        payload.image_size,
+        payload.image_style
+      );
+    }
   } catch (err) {
     storyStatus.textContent = "Story failed to generate.";
     showToast(err.message, "error");
@@ -463,7 +506,9 @@ storyForm.addEventListener("submit", async (event) => {
 async function downloadFile(path, fallbackName) {
   if (!state.story) return;
   try {
-    const resp = await fetch(apiUrl(path));
+    const resp = await fetch(apiUrl(path), {
+      headers: await authHeaders({ json: false }),
+    });
     if (!resp.ok) {
       throw new Error("Download failed.");
     }
@@ -493,12 +538,7 @@ regenImagesBtn.addEventListener("click", async () => {
   if (!state.story) return;
   try {
     const imageStyle = storyForm.elements["image_style"].value || "Watercolor";
-    const data = await api(`/story/${state.story.story_id}/images`, {
-      method: "POST",
-      body: JSON.stringify({ size: "512x512", image_style: imageStyle }),
-    });
-    state.story = data;
-    renderStory(data);
+    await generateImagesPerSection(state.story.story_id, "512x512", imageStyle);
   } catch (err) {
     showToast(err.message, "error");
   }

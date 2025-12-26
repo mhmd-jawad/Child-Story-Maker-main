@@ -206,6 +206,13 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# Node
+node_modules/
+web/node_modules/
+
+# Vercel
+.vercel/
+
 # Marimo
 marimo/_static/
 marimo/_lsp/
