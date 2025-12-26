@@ -207,6 +207,7 @@
                 <button id="downloadZipBtn" class="ghost hidden">Download ZIP</button>
                 <button id="downloadPdfBtn" class="ghost hidden">Download PDF</button>
                 <button id="shareBtn" class="ghost hidden">Share</button>
+                <button id="readerBtn" class="ghost hidden">Reader mode</button>
                 <button id="regenImagesBtn" class="ghost hidden">Generate images</button>
               </div>
             </div>
@@ -281,7 +282,37 @@
               <button id="learningGenerateBtn" class="primary ghost-outline">
                 Generate learning pack
               </button>
-              <div id="learningBody" class="panel-body"></div>
+              <div class="learning-editor">
+                <label>Summary</label>
+                <textarea
+                  id="learningSummary"
+                  rows="3"
+                  placeholder="Write a short summary for the child."
+                ></textarea>
+
+                <div class="editor-section">
+                  <div class="editor-head">
+                    <h5>Questions</h5>
+                    <button id="addQuestionBtn" class="ghost">Add question</button>
+                  </div>
+                  <div id="questionsList" class="editor-list"></div>
+                </div>
+
+                <div class="editor-section">
+                  <div class="editor-head">
+                    <h5>Vocabulary</h5>
+                    <button id="addVocabBtn" class="ghost">Add vocab</button>
+                  </div>
+                  <div id="vocabList" class="editor-list"></div>
+                </div>
+
+                <button id="saveLearningBtn" class="primary">Save learning pack</button>
+              </div>
+
+              <div class="panel-body">
+                <div class="preview-title">Preview</div>
+                <div id="learningBody"></div>
+              </div>
             </div>
           </div>
         </div>

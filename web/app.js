@@ -23,6 +23,7 @@ const state = {
   stories: [],
   report: null,
   learning: null,
+  learningDraft: { summary: "", questions: [], vocabulary: [] },
   shareToken: "",
   shareStory: null,
 };
@@ -65,6 +66,13 @@ const storyTabs = document.querySelectorAll(".story-tab");
 const ttsBtn = document.getElementById("ttsBtn");
 const playAllBtn = document.getElementById("playAllBtn");
 const voiceSelect = document.getElementById("voiceSelect");
+const readerBtn = document.getElementById("readerBtn");
+const learningSummary = document.getElementById("learningSummary");
+const questionsList = document.getElementById("questionsList");
+const vocabList = document.getElementById("vocabList");
+const addQuestionBtn = document.getElementById("addQuestionBtn");
+const addVocabBtn = document.getElementById("addVocabBtn");
+const saveLearningBtn = document.getElementById("saveLearningBtn");
 
 const audioPlayer = new Audio();
 let audioQueue = [];
@@ -128,6 +136,120 @@ function resetStoryPanels() {
   state.report = null;
   state.learning = null;
   setStoryTab("story");
+}
+
+function setLearningDraft(learning) {
+  const questions = Array.isArray(learning?.questions) ? learning.questions : [];
+  const vocabulary = Array.isArray(learning?.vocabulary) ? learning.vocabulary : [];
+  state.learningDraft = {
+    summary: learning?.summary || "",
+    questions: questions.map((q) => ({
+      question: q.question || "",
+      answer: q.answer || "",
+    })),
+    vocabulary: vocabulary.map((v) => ({
+      word: v.word || "",
+      definition: v.definition || "",
+      example: v.example || "",
+    })),
+  };
+  renderLearningEditor();
+}
+
+function renderLearningEditor() {
+  learningSummary.value = state.learningDraft.summary || "";
+  questionsList.innerHTML = "";
+  vocabList.innerHTML = "";
+
+  if (state.learningDraft.questions.length === 0) {
+    addQuestionRow("", "");
+  } else {
+    state.learningDraft.questions.forEach((q) => addQuestionRow(q.question, q.answer));
+  }
+
+  if (state.learningDraft.vocabulary.length === 0) {
+    addVocabRow("", "", "");
+  } else {
+    state.learningDraft.vocabulary.forEach((v) =>
+      addVocabRow(v.word, v.definition, v.example)
+    );
+  }
+}
+
+function addQuestionRow(question, answer) {
+  const row = document.createElement("div");
+  row.className = "editor-row question-row";
+  row.innerHTML = `
+    <input type="text" class="question-text" placeholder="Question" value="${escapeHtml(
+      question || ""
+    )}" />
+    <input type="text" class="question-answer" placeholder="Answer (optional)" value="${escapeHtml(
+      answer || ""
+    )}" />
+    <div class="row-actions">
+      <button class="ghost remove-row">Remove</button>
+    </div>
+  `;
+  row.querySelector(".remove-row").addEventListener("click", () => {
+    row.remove();
+  });
+  questionsList.appendChild(row);
+}
+
+function addVocabRow(word, definition, example) {
+  const row = document.createElement("div");
+  row.className = "editor-row vocab-row";
+  row.innerHTML = `
+    <input type="text" class="vocab-word" placeholder="Word" value="${escapeHtml(
+      word || ""
+    )}" />
+    <input type="text" class="vocab-definition" placeholder="Definition" value="${escapeHtml(
+      definition || ""
+    )}" />
+    <input type="text" class="vocab-example" placeholder="Example sentence (optional)" value="${escapeHtml(
+      example || ""
+    )}" />
+    <div class="row-actions">
+      <button class="ghost remove-row">Remove</button>
+    </div>
+  `;
+  row.querySelector(".remove-row").addEventListener("click", () => {
+    row.remove();
+  });
+  vocabList.appendChild(row);
+}
+
+function collectLearningDraft() {
+  const summary = learningSummary.value.trim();
+  const questions = Array.from(
+    questionsList.querySelectorAll(".question-row")
+  ).map((row) => {
+    const question = row.querySelector(".question-text")?.value.trim() || "";
+    const answer = row.querySelector(".question-answer")?.value.trim() || "";
+    return { question, answer };
+  });
+  const vocabulary = Array.from(
+    vocabList.querySelectorAll(".vocab-row")
+  ).map((row) => {
+    const word = row.querySelector(".vocab-word")?.value.trim() || "";
+    const definition = row.querySelector(".vocab-definition")?.value.trim() || "";
+    const example = row.querySelector(".vocab-example")?.value.trim() || "";
+    return { word, definition, example };
+  });
+  return {
+    summary,
+    questions: questions.filter((q) => q.question || q.answer),
+    vocabulary: vocabulary.filter((v) => v.word || v.definition || v.example),
+  };
+}
+
+function escapeHtml(text) {
+  return String(text || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 async function bearerToken() {
@@ -334,6 +456,7 @@ async function generateStory(payload) {
   shareBtn.classList.add("hidden");
   regenImagesBtn.classList.add("hidden");
   playAllBtn.classList.add("hidden");
+  readerBtn.classList.add("hidden");
 
   const story = await api("/story", {
     method: "POST",
@@ -374,6 +497,7 @@ function renderStory(story) {
   downloadZipBtn.classList.remove("hidden");
   downloadPdfBtn.classList.remove("hidden");
   shareBtn.classList.remove("hidden");
+  readerBtn.classList.remove("hidden");
   if (story.sections && story.sections.some((s) => !s.image_url)) {
     regenImagesBtn.classList.remove("hidden");
   }
@@ -647,15 +771,18 @@ async function loadLearning() {
   if (!state.story) return;
   if (state.learning) {
     renderLearning(state.learning);
+    setLearningDraft(state.learning);
     return;
   }
   try {
     const learning = await api(`/story/${state.story.story_id}/learning`);
     state.learning = learning;
     renderLearning(learning);
+    setLearningDraft(learning);
   } catch (err) {
     learningBody.innerHTML =
       "<div class='muted'>No learning pack yet. Click Generate.</div>";
+    setLearningDraft({ summary: "", questions: [], vocabulary: [] });
   }
 }
 
@@ -685,6 +812,33 @@ async function generateNarration() {
   }
 }
 
+async function saveLearningPack() {
+  if (!state.story) {
+    showToast("Generate a story first.", "error");
+    return;
+  }
+  const payload = collectLearningDraft();
+  try {
+    saveLearningBtn.disabled = true;
+    const learning = await api(`/story/${state.story.story_id}/learning/manual`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    state.learning = learning;
+    renderLearning(learning);
+    showToast("Learning pack saved.");
+  } catch (err) {
+    showToast(err.message, "error");
+  } finally {
+    saveLearningBtn.disabled = false;
+  }
+}
+
+function exitReaderMode() {
+  document.body.classList.remove("reader-mode");
+  readerBtn.textContent = "Reader mode";
+}
+
 tabs.forEach((tab) => {
   tab.addEventListener("click", () => {
     tabs.forEach((t) => t.classList.remove("active"));
@@ -709,6 +863,26 @@ storyTabs.forEach((tab) => {
       await loadLearning();
     }
   });
+});
+
+readerBtn.addEventListener("click", () => {
+  const enabled = document.body.classList.toggle("reader-mode");
+  readerBtn.textContent = enabled ? "Exit reader" : "Reader mode";
+});
+
+addQuestionBtn.addEventListener("click", (event) => {
+  event.preventDefault();
+  addQuestionRow("", "");
+});
+
+addVocabBtn.addEventListener("click", (event) => {
+  event.preventDefault();
+  addVocabRow("", "", "");
+});
+
+saveLearningBtn.addEventListener("click", async (event) => {
+  event.preventDefault();
+  await saveLearningPack();
 });
 
 loginForm.addEventListener("submit", async (event) => {
@@ -935,6 +1109,7 @@ learningGenerateBtn.addEventListener("click", async () => {
     });
     state.learning = learning;
     renderLearning(learning);
+    setLearningDraft(learning);
   } catch (err) {
     showToast(err.message, "error");
   } finally {
@@ -960,28 +1135,34 @@ logoutBtn.addEventListener("click", async () => {
   localStorage.removeItem(ACTIVE_CHILD_KEY);
   setAuthUI(false);
   setView(authView);
+  exitReaderMode();
 });
 
 profilesBtn.addEventListener("click", () => {
   renderChildren();
   setView(childView);
+  exitReaderMode();
 });
 
 libraryBtn.addEventListener("click", () => {
   loadLibrary();
   setView(libraryView);
+  exitReaderMode();
 });
 
 studioBtn.addEventListener("click", () => {
   setView(studioView);
+  exitReaderMode();
 });
 
 toStudioBtn.addEventListener("click", () => {
   setView(studioView);
+  exitReaderMode();
 });
 
 newStoryBtn.addEventListener("click", () => {
   setView(studioView);
+  exitReaderMode();
 });
 
 shareDownloadZipBtn.addEventListener("click", () => {
@@ -1009,6 +1190,7 @@ async function initApp() {
     return;
   }
   await loadSession();
+  setLearningDraft({ summary: "", questions: [], vocabulary: [] });
 }
 
 initApp();

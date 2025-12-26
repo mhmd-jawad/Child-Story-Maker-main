@@ -168,6 +168,24 @@ class ChildReq(BaseModel):
     interests: str = Field(min_length=2, max_length=200)
 
 
+class LearningQuestion(BaseModel):
+    question: str = Field(default="", max_length=400)
+    answer: str = Field(default="", max_length=400)
+
+
+class LearningVocab(BaseModel):
+    word: str = Field(default="", max_length=80)
+    definition: str = Field(default="", max_length=400)
+    example: str = Field(default="", max_length=400)
+
+
+class LearningUpdateReq(BaseModel):
+    summary: str = Field(default="", max_length=2000)
+    questions: List[LearningQuestion] = Field(default_factory=list)
+    vocabulary: List[LearningVocab] = Field(default_factory=list)
+    model_config = ConfigDict(extra="forbid")
+
+
 def _require_parent_id(request: Request) -> int:
     auth = request.headers.get("authorization", "")
     parts = auth.split()
@@ -695,6 +713,41 @@ async def generate_learning(story_id: str, request: Request, refresh: bool = Fal
         )
     else:
         LEARNING_DB[story_id] = learning
+    return learning
+
+
+@app.post("/story/{story_id}/learning/manual")
+async def save_learning_manual(
+    story_id: str, req: LearningUpdateReq, request: Request
+):
+    use_supabase = (not USE_LOCAL_DB) and supabase_db.enabled()
+    if use_supabase:
+        token = _require_bearer_token(request)
+        data = await supabase_db.get_story(token=token, story_id=story_id)
+        if not data:
+            raise HTTPException(status_code=404, detail="Story not found")
+        learning = {
+            "summary": (req.summary or "").strip(),
+            "questions": [q.model_dump() for q in req.questions],
+            "vocabulary": [v.model_dump() for v in req.vocabulary],
+        }
+        await supabase_db.upsert_story_learning(
+            token=token,
+            story_id=story_id,
+            summary=learning["summary"],
+            questions=learning["questions"],
+            vocabulary=learning["vocabulary"],
+        )
+        return learning
+
+    if story_id not in DB:
+        raise HTTPException(status_code=404, detail="Story not found")
+    learning = {
+        "summary": (req.summary or "").strip(),
+        "questions": [q.model_dump() for q in req.questions],
+        "vocabulary": [v.model_dump() for v in req.vocabulary],
+    }
+    LEARNING_DB[story_id] = learning
     return learning
 
 
