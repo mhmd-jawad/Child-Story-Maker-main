@@ -1,4 +1,5 @@
 # child_story_maker/backend/app.py
+import os
 import uuid
 from typing import Optional, List, Dict, Any
 
@@ -57,9 +58,21 @@ app.add_middleware(
 
 # Static files for generated media
 ensure_media_dir()
-app.mount("/media", StaticFiles(directory=str(repo_root() / "media")), name="media")
+media_dir = repo_root() / "media"
+if media_dir.exists():
+    app.mount("/media", StaticFiles(directory=str(media_dir)), name="media")
 
-init_db()
+USE_LOCAL_DB = os.getenv("USE_LOCAL_DB", "1") == "1"
+if USE_LOCAL_DB:
+    init_db()
+
+
+def _require_local_db() -> None:
+    if not USE_LOCAL_DB:
+        raise HTTPException(
+            status_code=501,
+            detail="Local auth is disabled. Use Supabase for auth and profiles.",
+        )
 
 
 # -------------------------------
@@ -165,6 +178,7 @@ def health():
 
 @app.post("/auth/register", response_model=AuthResp)
 def register(req: AuthReq):
+    _require_local_db()
     try:
         parent_id = create_parent(req.email, req.password)
     except Exception as exc:
@@ -177,6 +191,7 @@ def register(req: AuthReq):
 
 @app.post("/auth/login", response_model=AuthResp)
 def login(req: AuthReq):
+    _require_local_db()
     parent_id = authenticate_parent(req.email, req.password)
     if not parent_id:
         raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -188,6 +203,7 @@ def login(req: AuthReq):
 
 @app.post("/auth/logout")
 def logout(request: Request):
+    _require_local_db()
     auth = request.headers.get("authorization", "")
     parts = auth.split()
     token = ""
@@ -199,6 +215,7 @@ def logout(request: Request):
 
 @app.get("/auth/me")
 def auth_me(parent_id: int = Depends(_require_parent_id)):
+    _require_local_db()
     parent = get_parent(parent_id)
     if not parent:
         raise HTTPException(status_code=404, detail="Parent not found")
@@ -207,6 +224,7 @@ def auth_me(parent_id: int = Depends(_require_parent_id)):
 
 @app.get("/children")
 def list_children(parent_id: int = Depends(_require_parent_id)):
+    _require_local_db()
     rows = db_list_children(parent_id)
     children = [
         {"id": int(r["id"]), "name": r["name"], "age": int(r["age"]), "interests": r["interests"]}
@@ -217,6 +235,7 @@ def list_children(parent_id: int = Depends(_require_parent_id)):
 
 @app.post("/children")
 def create_child(req: ChildReq, parent_id: int = Depends(_require_parent_id)):
+    _require_local_db()
     try:
         child_id = db_create_child(parent_id, req.name, req.age, req.interests)
     except Exception as exc:
@@ -226,6 +245,7 @@ def create_child(req: ChildReq, parent_id: int = Depends(_require_parent_id)):
 
 @app.delete("/children/{child_id}")
 def delete_child(child_id: int, parent_id: int = Depends(_require_parent_id)):
+    _require_local_db()
     db_delete_child(parent_id, child_id)
     return {"ok": True}
 

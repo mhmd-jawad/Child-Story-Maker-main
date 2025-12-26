@@ -74,6 +74,29 @@ Run:
 docker run --rm -p 8000:8000 -e OPENAI_API_KEY=your_key child-story-maker
 ```
 
+## Cloud Deploy (Vercel + Supabase)
+
+This setup deploys the web UI + API on Vercel and uses Supabase for auth/child profiles + media storage.
+
+1) Create a Supabase project.
+2) In Supabase SQL editor, run `supabase/schema.sql`.
+3) In Supabase Storage, create a bucket named `story-media` (or update env var) and set it to public.
+4) In Supabase Auth, enable Email auth.
+5) Copy your Supabase Project URL + anon key into `web/config.js`.
+6) Copy your Supabase Project URL + service role key into Vercel env vars.
+7) Deploy to Vercel (frontend + API):
+   - Import the repo in Vercel.
+   - Set Environment Variables:
+     - `OPENAI_API_KEY`
+     - `SUPABASE_URL`
+     - `SUPABASE_SERVICE_ROLE_KEY`
+     - `SUPABASE_STORAGE_BUCKET=story-media`
+     - `USE_LOCAL_DB=0`
+     - `DISABLE_LOCAL_MEDIA=1`
+   - Set `web/config.js` to use `apiBase: "/api"`.
+
+After deploy, the web app will call the Vercel API at `/api` and store child profiles in Supabase.
+
 ## Parent Login + Child Profiles (Web UI)
 
 The web UI supports a local parent account and multiple child profiles stored

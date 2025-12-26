@@ -1,4 +1,16 @@
-const API_BASE = "";
+const CONFIG = window.APP_CONFIG || {};
+const API_BASE = CONFIG.apiBase || "";
+const SUPABASE_URL = CONFIG.supabaseUrl || "";
+const SUPABASE_ANON_KEY = CONFIG.supabaseAnonKey || "";
+const USE_SUPABASE = Boolean(
+  SUPABASE_URL &&
+    SUPABASE_ANON_KEY &&
+    window.supabase &&
+    typeof window.supabase.createClient === "function"
+);
+const supabaseClient = USE_SUPABASE
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  : null;
 const TOKEN_KEY = "cs_token";
 const ACTIVE_CHILD_KEY = "cs_active_child";
 
@@ -6,7 +18,7 @@ const state = {
   token: localStorage.getItem(TOKEN_KEY) || "",
   userEmail: "",
   children: [],
-  activeChildId: Number(localStorage.getItem(ACTIVE_CHILD_KEY)) || null,
+  activeChildId: localStorage.getItem(ACTIVE_CHILD_KEY) || null,
   story: null,
 };
 
@@ -28,6 +40,16 @@ const downloadPdfBtn = document.getElementById("downloadPdfBtn");
 const regenImagesBtn = document.getElementById("regenImagesBtn");
 const chaptersValue = document.getElementById("chaptersValue");
 const toast = document.getElementById("toast");
+
+function apiUrl(path) {
+  if (!API_BASE) return path;
+  const base = API_BASE.endsWith("/") ? API_BASE.slice(0, -1) : API_BASE;
+  return `${base}${path}`;
+}
+
+function childIdEquals(left, right) {
+  return String(left) === String(right);
+}
 
 const loginForm = document.getElementById("loginForm");
 const registerForm = document.getElementById("registerForm");
@@ -59,14 +81,14 @@ function setAuthUI(loggedIn) {
 
 function authHeaders() {
   const headers = { "Content-Type": "application/json" };
-  if (state.token) {
+  if (!USE_SUPABASE && state.token) {
     headers.Authorization = `Bearer ${state.token}`;
   }
   return headers;
 }
 
 async function api(path, options = {}) {
-  const resp = await fetch(`${API_BASE}${path}`, {
+  const resp = await fetch(apiUrl(path), {
     headers: authHeaders(),
     ...options,
   });
@@ -88,6 +110,24 @@ async function api(path, options = {}) {
 }
 
 async function loadSession() {
+  if (USE_SUPABASE) {
+    try {
+      const { data, error } = await supabaseClient.auth.getUser();
+      if (error || !data.user) {
+        setAuthUI(false);
+        setView(authView);
+        return;
+      }
+      state.userEmail = data.user.email || "";
+      userBadge.textContent = state.userEmail;
+      setAuthUI(true);
+      await loadChildren();
+    } catch (err) {
+      setAuthUI(false);
+      setView(authView);
+    }
+    return;
+  }
   if (!state.token) {
     setAuthUI(false);
     setView(authView);
@@ -108,14 +148,25 @@ async function loadSession() {
 }
 
 async function loadChildren() {
-  const data = await api("/children");
-  state.children = data.children || [];
+  if (USE_SUPABASE) {
+    const { data, error } = await supabaseClient
+      .from("children")
+      .select("id, name, age, interests")
+      .order("created_at", { ascending: true });
+    if (error) {
+      throw new Error(error.message);
+    }
+    state.children = data || [];
+  } else {
+    const data = await api("/children");
+    state.children = data.children || [];
+  }
   renderChildren();
   if (state.children.length === 0) {
     setView(childView);
   } else {
     if (!state.activeChildId) {
-      state.activeChildId = state.children[0].id;
+      state.activeChildId = String(state.children[0].id);
       localStorage.setItem(ACTIVE_CHILD_KEY, state.activeChildId);
     }
     setView(studioView);
@@ -142,22 +193,36 @@ function renderChildren() {
       <button class="ghost" data-action="delete">Delete</button>
     `;
     card.querySelector('[data-action="select"]').addEventListener("click", () => {
-      state.activeChildId = child.id;
-      localStorage.setItem(ACTIVE_CHILD_KEY, child.id);
+      state.activeChildId = String(child.id);
+      localStorage.setItem(ACTIVE_CHILD_KEY, state.activeChildId);
       setView(studioView);
       renderActiveChild();
     });
     card.querySelector('[data-action="delete"]').addEventListener("click", async () => {
       if (!confirm(`Delete ${child.name}?`)) return;
-      await api(`/children/${child.id}`, { method: "DELETE" });
-      await loadChildren();
+      try {
+        if (USE_SUPABASE) {
+          const { error } = await supabaseClient
+            .from("children")
+            .delete()
+            .eq("id", child.id);
+          if (error) {
+            throw new Error(error.message);
+          }
+        } else {
+          await api(`/children/${child.id}`, { method: "DELETE" });
+        }
+        await loadChildren();
+      } catch (err) {
+        showToast(err.message, "error");
+      }
     });
     childGrid.appendChild(card);
   });
 }
 
 function renderActiveChild() {
-  const child = state.children.find((c) => c.id === state.activeChildId);
+  const child = state.children.find((c) => childIdEquals(c.id, state.activeChildId));
   if (!child) {
     activeChildBadge.textContent = "No active child";
     return;
@@ -172,7 +237,7 @@ function ageToGroup(age) {
 }
 
 function getActiveChild() {
-  return state.children.find((c) => c.id === state.activeChildId);
+  return state.children.find((c) => childIdEquals(c.id, state.activeChildId));
 }
 
 function buildPrompt(basePrompt, child, traits, setting) {
@@ -215,9 +280,12 @@ function renderStory(story) {
   (story.sections || []).forEach((section) => {
     const card = document.createElement("div");
     card.className = "story-section";
-    const imgUrl = section.image_url
-      ? new URL(section.image_url, window.location.origin).toString()
-      : "";
+    let imgUrl = "";
+    if (section.image_url) {
+      imgUrl = section.image_url.startsWith("http")
+        ? section.image_url
+        : new URL(section.image_url, window.location.origin).toString();
+    }
     card.innerHTML = `
       <h4>${section.title || "Section"}</h4>
       <p>${section.text.replace(/\n/g, "<br />")}</p>
@@ -250,12 +318,29 @@ tabs.forEach((tab) => {
 loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const formData = new FormData(loginForm);
+  const email = String(formData.get("email") || "").trim();
+  const password = String(formData.get("password") || "");
   try {
+    if (USE_SUPABASE) {
+      const { data, error } = await supabaseClient.auth.signInWithPassword({
+        email,
+        password,
+      });
+      if (error) {
+        throw new Error(error.message);
+      }
+      state.userEmail = data.user?.email || email;
+      userBadge.textContent = state.userEmail;
+      setAuthUI(true);
+      await loadChildren();
+      return;
+    }
+
     const data = await api("/auth/login", {
       method: "POST",
       body: JSON.stringify({
-        email: formData.get("email"),
-        password: formData.get("password"),
+        email,
+        password,
       }),
     });
     state.token = data.token;
@@ -272,12 +357,33 @@ loginForm.addEventListener("submit", async (event) => {
 registerForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const formData = new FormData(registerForm);
+  const email = String(formData.get("email") || "").trim();
+  const password = String(formData.get("password") || "");
   try {
+    if (USE_SUPABASE) {
+      const { data, error } = await supabaseClient.auth.signUp({
+        email,
+        password,
+      });
+      if (error) {
+        throw new Error(error.message);
+      }
+      if (!data.session) {
+        showToast("Check your email to confirm your account.");
+        return;
+      }
+      state.userEmail = data.user?.email || email;
+      userBadge.textContent = state.userEmail;
+      setAuthUI(true);
+      await loadChildren();
+      return;
+    }
+
     const data = await api("/auth/register", {
       method: "POST",
       body: JSON.stringify({
-        email: formData.get("email"),
-        password: formData.get("password"),
+        email,
+        password,
       }),
     });
     state.token = data.token;
@@ -295,13 +401,24 @@ childForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const formData = new FormData(childForm);
   try {
+    const payload = {
+      name: formData.get("name"),
+      age: Number(formData.get("age")),
+      interests: formData.get("interests"),
+    };
+    if (USE_SUPABASE) {
+      const { error } = await supabaseClient.from("children").insert(payload);
+      if (error) {
+        throw new Error(error.message);
+      }
+      childForm.reset();
+      await loadChildren();
+      return;
+    }
+
     await api("/children", {
       method: "POST",
-      body: JSON.stringify({
-        name: formData.get("name"),
-        age: Number(formData.get("age")),
-        interests: formData.get("interests"),
-      }),
+      body: JSON.stringify(payload),
     });
     childForm.reset();
     await loadChildren();
@@ -346,7 +463,7 @@ storyForm.addEventListener("submit", async (event) => {
 async function downloadFile(path, fallbackName) {
   if (!state.story) return;
   try {
-    const resp = await fetch(path);
+    const resp = await fetch(apiUrl(path));
     if (!resp.ok) {
       throw new Error("Download failed.");
     }
@@ -389,7 +506,11 @@ regenImagesBtn.addEventListener("click", async () => {
 
 logoutBtn.addEventListener("click", async () => {
   try {
-    await api("/auth/logout", { method: "POST" });
+    if (USE_SUPABASE) {
+      await supabaseClient.auth.signOut();
+    } else {
+      await api("/auth/logout", { method: "POST" });
+    }
   } catch (err) {
     // ignore
   }
