@@ -62,6 +62,12 @@ const shareDownloadZipBtn = document.getElementById("shareDownloadZipBtn");
 const shareDownloadPdfBtn = document.getElementById("shareDownloadPdfBtn");
 const openAppBtn = document.getElementById("openAppBtn");
 const storyTabs = document.querySelectorAll(".story-tab");
+const ttsBtn = document.getElementById("ttsBtn");
+const playAllBtn = document.getElementById("playAllBtn");
+const voiceSelect = document.getElementById("voiceSelect");
+
+const audioPlayer = new Audio();
+let audioQueue = [];
 
 function apiUrl(path) {
   if (!API_BASE) return path;
@@ -327,6 +333,7 @@ async function generateStory(payload) {
   downloadPdfBtn.classList.add("hidden");
   shareBtn.classList.add("hidden");
   regenImagesBtn.classList.add("hidden");
+  playAllBtn.classList.add("hidden");
 
   const story = await api("/story", {
     method: "POST",
@@ -370,6 +377,11 @@ function renderStory(story) {
   if (story.sections && story.sections.some((s) => !s.image_url)) {
     regenImagesBtn.classList.remove("hidden");
   }
+  if (story.sections && story.sections.some((s) => s.audio_url)) {
+    playAllBtn.classList.remove("hidden");
+  } else {
+    playAllBtn.classList.add("hidden");
+  }
 }
 
 function renderStorySections(story, targetEl) {
@@ -377,20 +389,59 @@ function renderStorySections(story, targetEl) {
   (story.sections || []).forEach((section) => {
     const card = document.createElement("div");
     card.className = "story-section";
-    let imgUrl = "";
-    if (section.image_url) {
-      imgUrl = section.image_url.startsWith("http")
-        ? section.image_url
-        : new URL(section.image_url, window.location.origin).toString();
-    }
+    const imgUrl = normalizeMediaUrl(section.image_url);
+    const audioUrl = normalizeMediaUrl(section.audio_url);
     card.innerHTML = `
       <h4>${section.title || "Section"}</h4>
       <p>${section.text.replace(/\n/g, "<br />")}</p>
+      ${audioUrl ? `<button class="listen-btn" data-audio="${audioUrl}"><span>🔊</span> Listen</button>` : ""}
       ${imgUrl ? `<img src="${imgUrl}" alt="Story art" />` : ""}
     `;
+    const listenBtn = card.querySelector(".listen-btn");
+    if (listenBtn) {
+      listenBtn.addEventListener("click", () => {
+        playAudio(audioUrl);
+      });
+    }
     targetEl.appendChild(card);
   });
 }
+
+function normalizeMediaUrl(url) {
+  if (!url) return "";
+  if (url.startsWith("http")) return url;
+  return new URL(url, window.location.origin).toString();
+}
+
+function playAudio(url) {
+  if (!url) return;
+  audioQueue = [];
+  audioPlayer.src = url;
+  audioPlayer.play().catch(() => {
+    showToast("Unable to play audio.", "error");
+  });
+}
+
+function playQueue(urls) {
+  audioQueue = urls.slice();
+  const next = audioQueue.shift();
+  if (next) {
+    audioPlayer.src = next;
+    audioPlayer.play().catch(() => {
+      showToast("Unable to play audio.", "error");
+    });
+  }
+}
+
+audioPlayer.addEventListener("ended", () => {
+  if (audioQueue.length) {
+    const next = audioQueue.shift();
+    audioPlayer.src = next;
+    audioPlayer.play().catch(() => {
+      showToast("Unable to play audio.", "error");
+    });
+  }
+});
 
 function formatDate(ts) {
   if (!ts) return "";
@@ -608,6 +659,32 @@ async function loadLearning() {
   }
 }
 
+async function generateNarration() {
+  if (!state.story) {
+    showToast("Generate a story first.", "error");
+    return;
+  }
+  try {
+    ttsBtn.disabled = true;
+    storyStatus.textContent = "Generating narration...";
+    const voice = voiceSelect.value || "verse";
+    const updated = await api(`/story/${state.story.story_id}/tts`, {
+      method: "POST",
+      body: JSON.stringify({ voice, format: "mp3" }),
+    });
+    state.story = updated;
+    renderStory(updated);
+    if (state.story.sections && state.story.sections.some((s) => s.audio_url)) {
+      playAllBtn.classList.remove("hidden");
+    }
+  } catch (err) {
+    showToast(err.message, "error");
+    storyStatus.textContent = state.story?.title || "Story";
+  } finally {
+    ttsBtn.disabled = false;
+  }
+}
+
 tabs.forEach((tab) => {
   tab.addEventListener("click", () => {
     tabs.forEach((t) => t.classList.remove("active"));
@@ -821,6 +898,22 @@ downloadPdfBtn.addEventListener("click", () => {
 shareBtn.addEventListener("click", async () => {
   if (!state.story) return;
   await createShareLink(state.story.story_id);
+});
+
+ttsBtn.addEventListener("click", async () => {
+  await generateNarration();
+});
+
+playAllBtn.addEventListener("click", () => {
+  if (!state.story) return;
+  const urls = (state.story.sections || [])
+    .map((s) => normalizeMediaUrl(s.audio_url))
+    .filter(Boolean);
+  if (!urls.length) {
+    showToast("No narration audio yet.", "error");
+    return;
+  }
+  playQueue(urls);
 });
 
 regenImagesBtn.addEventListener("click", async () => {

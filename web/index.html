@@ -210,6 +210,56 @@
                 <button id="regenImagesBtn" class="ghost hidden">Generate images</button>
               </div>
             </div>
+            <div class="narration-bar">
+              <div class="narration-left">
+                <span class="narration-icon" aria-hidden="true">
+                  <svg viewBox="0 0 40 40" role="img" focusable="false">
+                    <defs>
+                      <linearGradient id="spark" x1="0" y1="0" x2="1" y2="1">
+                        <stop offset="0%" stop-color="#0f766e" />
+                        <stop offset="100%" stop-color="#f97316" />
+                      </linearGradient>
+                    </defs>
+                    <circle cx="20" cy="20" r="18" fill="url(#spark)" opacity="0.2" />
+                    <path
+                      d="M12 24V16h6l6-4v16l-6-4h-6z"
+                      fill="url(#spark)"
+                      stroke="#7a4b1f"
+                      stroke-width="1"
+                    />
+                    <path
+                      d="M27 15c2 2 2 8 0 10"
+                      fill="none"
+                      stroke="url(#spark)"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                    />
+                    <path
+                      d="M30 13c3 3 3 11 0 14"
+                      fill="none"
+                      stroke="#f59e0b"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                    />
+                  </svg>
+                </span>
+                <div>
+                  <div class="narration-title">Bedtime Radio</div>
+                  <div class="narration-sub">Let the story read itself aloud.</div>
+                </div>
+              </div>
+              <div class="narration-controls">
+                <select id="voiceSelect" aria-label="Narration voice">
+                  <option value="verse">Verse (gentle)</option>
+                  <option value="alloy">Alloy (warm)</option>
+                  <option value="nova">Nova (bright)</option>
+                  <option value="coral">Coral (soft)</option>
+                  <option value="shimmer">Shimmer (storybook)</option>
+                </select>
+                <button id="ttsBtn" class="ghost">Generate narration</button>
+                <button id="playAllBtn" class="ghost hidden">Play all</button>
+              </div>
+            </div>
             <div class="story-tabs">
               <button class="story-tab active" data-tab="story">Story</button>
               <button class="story-tab" data-tab="report">Safety report</button>

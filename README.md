@@ -9,6 +9,7 @@ Key features:
 - Share links (public read-only)
 - Safety & reading report
 - Learning pack (summary, questions, vocabulary)
+- Read-aloud narration (OpenAI TTS)
 
 ## Project Layout
 
@@ -47,6 +48,7 @@ IMAGE_MODEL=dall-e-2
 IMAGE_FALLBACK_MODELS=dall-e-2
 IMAGE_SIZE=512x512
 IMAGE_QUALITY=low
+TTS_MODEL=gpt-4o-mini-tts
 STORY_API_BASE_URL=http://127.0.0.1:8000
 ```
 

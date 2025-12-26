@@ -6,6 +6,7 @@ from child_story_maker.common.paths import repo_root
 
 load_dotenv(dotenv_path=repo_root() / ".env")
 OPENAI_BASE = "https://api.openai.com/v1"
+TTS_MODEL = os.getenv("TTS_MODEL", "gpt-4o-mini-tts").strip() or "gpt-4o-mini-tts"
 
 async def synthesize_tts(text: str, *, voice: str = "verse", fmt: str = "mp3") -> bytes:
     """
@@ -20,7 +21,7 @@ async def synthesize_tts(text: str, *, voice: str = "verse", fmt: str = "mp3") -
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY missing. Put it in .env")
     headers = {"Authorization": f"Bearer {api_key}"}
-    body = {"model": "gpt-4o-mini-tts", "voice": voice, "input": t, "format": fmt}
+    body = {"model": TTS_MODEL, "voice": voice, "input": t, "format": fmt}
     async with httpx.AsyncClient(timeout=120) as client:
         r = await client.post(f"{OPENAI_BASE}/audio/speech", json=body, headers=headers)
         r.raise_for_status()
