@@ -831,12 +831,6 @@ async def generate_section_image(
     return section
 
 
-# Serve the web UI
-WEB_DIR = repo_root() / "web"
-if WEB_DIR.exists():
-    app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
-
-
 @app.post("/image", response_model=ImageResp)
 async def generate_image(req: ImageReq):
     """
@@ -905,3 +899,9 @@ async def generate_tts(story_id: str, req: TTSReq, request: Request):
         "sections": d["sections"],
         "status": "ready",
     }
+
+
+# Serve the web UI (mount last so it doesn't shadow API routes)
+WEB_DIR = repo_root() / "web"
+if WEB_DIR.exists():
+    app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
