@@ -1,5 +1,10 @@
 const CONFIG = window.APP_CONFIG || {};
-const API_BASE = CONFIG.apiBase || "";
+const API_BASE =
+  CONFIG.apiBase ||
+  (window.location.hostname === "localhost" ||
+  window.location.hostname === "127.0.0.1"
+    ? ""
+    : "/api");
 const SUPABASE_URL = CONFIG.supabaseUrl || "";
 const SUPABASE_ANON_KEY = CONFIG.supabaseAnonKey || "";
 const USE_SUPABASE = Boolean(
