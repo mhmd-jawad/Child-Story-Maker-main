@@ -576,7 +576,9 @@ textarea {
 }
 
 .reader-mode .story-section img {
-  max-height: 520px;
+  max-height: none;
+  object-fit: contain;
+  background: #fffdf9;
 }
 
 .active-child {
