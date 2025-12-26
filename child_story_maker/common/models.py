@@ -49,7 +49,38 @@ STYLE_CHOICES = [
 IMG_STYLE_CHOICES = ["Watercolor", "Cartoon", "Crayon", "Paper-cut", "Clay"]
 SAFE_WORDS_BLOCKLIST = {
     # lightweight demo filter; replace with a policy service in production
-    "violence": ["kill", "murder", "blood", "weapon", "gun", "knife", "gore"],
-    "adult": ["alcohol", "drugs", "sex", "nude", "nudity", "bra", "bikini"],
+    "violence": [
+        "kill",
+        "kills",
+        "killed",
+        "killing",
+        "murder",
+        "murders",
+        "murdered",
+        "murdering",
+        "blood",
+        "gore",
+        "weapon",
+        "weapons",
+        "gun",
+        "guns",
+        "knife",
+        "knives",
+    ],
+    "adult": [
+        "alcohol",
+        "drug",
+        "drugs",
+        "sex",
+        "sexual",
+        "sexy",
+        "nude",
+        "nudes",
+        "nudity",
+        "bra",
+        "bras",
+        "bikini",
+        "bikinis",
+    ],
 }
 FONT_CACHE: Dict[str, Any] = {}

@@ -1,5 +1,6 @@
 import io
 import json
+import re
 import zipfile
 from dataclasses import asdict
 from typing import Any, Dict, Optional, Tuple
@@ -24,12 +25,18 @@ from child_story_maker.common.models import *
 
 
 def kid_safe_prompt(prompt: str) -> Tuple[bool, str]:
-    lowered = prompt.lower()
     hits = []
     for _, words in SAFE_WORDS_BLOCKLIST.items():
         for w in words:
-            if w in lowered:
-                hits.append(w)
+            term = (w or "").strip()
+            if not term:
+                continue
+            parts = [re.escape(p) for p in term.split() if p.strip()]
+            if not parts:
+                continue
+            pattern = r"\b" + r"\s+".join(parts) + r"\b"
+            if re.search(pattern, prompt, flags=re.IGNORECASE):
+                hits.append(term.lower())
     if hits:
         return (
             False,
