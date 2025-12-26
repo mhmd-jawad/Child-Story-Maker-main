@@ -1,5 +1,5 @@
 import os
-import requests
+import httpx
 
 from child_story_maker.common.models import Chapter, Story
 from child_story_maker.common.utils import reading_level_for_age
@@ -47,12 +47,12 @@ def story_generation(
     last_error = None
     for _ in range(3):
         try:
-            resp = requests.post(
+            resp = httpx.post(
                 f"{API_BASE_URL}/story",
                 json=payload,
                 timeout=REQUEST_TIMEOUT,
             )
-            if not resp.ok:
+            if resp.status_code >= 400:
                 try:
                     detail = resp.json().get("detail")
                 except Exception:
@@ -104,12 +104,12 @@ def image_generation(title, text, img_style):
         f"Illustration for the story titled '{title}'. "
         f"Scene: {text}. Style: {img_style}."
     )
-    resp = requests.post(
+    resp = httpx.post(
         f"{API_BASE_URL}/image",
         json={"image_prompt": prompt, "size": IMAGE_SIZE},
         timeout=REQUEST_TIMEOUT,
     )
-    if not resp.ok:
+    if resp.status_code >= 400:
         try:
             detail = resp.json().get("detail")
         except Exception:
@@ -119,7 +119,7 @@ def image_generation(title, text, img_style):
     image_url = data.get("image_url")
     if not image_url:
         raise RuntimeError("Image API returned no image_url.")
-    img_resp = requests.get(f"{API_BASE_URL}{image_url}", timeout=REQUEST_TIMEOUT)
-    if not img_resp.ok:
+    img_resp = httpx.get(f"{API_BASE_URL}{image_url}", timeout=REQUEST_TIMEOUT)
+    if img_resp.status_code >= 400:
         raise RuntimeError(f"Image download error {img_resp.status_code}: {img_resp.text}")
     return img_resp.content

@@ -36,6 +36,11 @@ The project also includes an embeddings-based “child-story similarity” score
    pip install -r requirements.txt
    ```
 
+Optional (Streamlit UI):
+```bash
+pip install -r requirements-streamlit.txt
+```
+
 2. Create `.env` in the repo root:
    ```ini
    OPENAI_API_KEY=your_key_here

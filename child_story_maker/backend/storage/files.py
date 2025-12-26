@@ -1,6 +1,6 @@
 import os
 
-import requests
+import httpx
 
 from child_story_maker.common.paths import repo_root
 
@@ -23,7 +23,8 @@ def _supabase_upload(path: str, data: bytes, content_type: str) -> str:
         "Content-Type": content_type,
         "x-upsert": "true",
     }
-    resp = requests.post(url, headers=headers, data=data, timeout=60)
+    with httpx.Client(timeout=60) as client:
+        resp = client.post(url, headers=headers, content=data)
     if resp.status_code not in (200, 201):
         raise RuntimeError(f"Supabase upload failed: {resp.status_code} {resp.text}")
     return f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_STORAGE_BUCKET}/{path}"

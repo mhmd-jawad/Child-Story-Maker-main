@@ -1,6 +1,6 @@
 from dataclasses import dataclass
+from typing import Any
 from typing import Dict, List, Optional
-from PIL import Image, ImageDraw, ImageFont
 
 
 # -----------------------------
@@ -52,4 +52,4 @@ SAFE_WORDS_BLOCKLIST = {
     "violence": ["kill", "murder", "blood", "weapon", "gun", "knife", "gore"],
     "adult": ["alcohol", "drugs", "sex", "nude", "nudity", "bra", "bikini"],
 }
-FONT_CACHE: Dict[str, ImageFont.ImageFont] = {}
+FONT_CACHE: Dict[str, Any] = {}
