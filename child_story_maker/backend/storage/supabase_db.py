@@ -35,6 +35,7 @@ async def create_story(
     style: str,
     child_id: Optional[str],
     sections: List[Dict[str, Any]],
+    usage: Optional[Dict[str, Any]] = None,
 ) -> str:
     if not enabled():
         raise RuntimeError("Supabase is not configured (SUPABASE_URL/SUPABASE_ANON_KEY).")
@@ -46,6 +47,15 @@ async def create_story(
         "language": language,
         "style": style,
     }
+    if usage:
+        if usage.get("model"):
+            story_payload["model"] = usage.get("model")
+        if usage.get("input_tokens") is not None:
+            story_payload["input_tokens"] = int(usage.get("input_tokens"))
+        if usage.get("output_tokens") is not None:
+            story_payload["output_tokens"] = int(usage.get("output_tokens"))
+        if usage.get("total_tokens") is not None:
+            story_payload["total_tokens"] = int(usage.get("total_tokens"))
     if child_id:
         story_payload["child_id"] = child_id
 
@@ -136,6 +146,158 @@ async def get_story(*, token: str, story_id: str) -> Optional[Dict[str, Any]]:
         "language": story_row.get("language") or "",
         "style": story_row.get("style") or "",
     }
+
+
+async def list_stories(
+    *, token: str, child_id: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    if not enabled():
+        raise RuntimeError("Supabase is not configured (SUPABASE_URL/SUPABASE_ANON_KEY).")
+    params: Dict[str, str] = {
+        "select": "id,title,created_at,child_id,age_group,language,style,model,input_tokens,output_tokens,total_tokens",
+        "order": "created_at.desc",
+    }
+    if child_id:
+        params["child_id"] = f"eq.{child_id}"
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(
+            _rest_url("stories"),
+            headers=_headers(token),
+            params=params,
+        )
+        resp.raise_for_status()
+        return resp.json() or []
+
+
+async def delete_story(*, token: str, story_id: str) -> None:
+    if not enabled():
+        raise RuntimeError("Supabase is not configured (SUPABASE_URL/SUPABASE_ANON_KEY).")
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.delete(
+            _rest_url("stories"),
+            headers=_headers(token),
+            params={"id": f"eq.{story_id}"},
+        )
+        resp.raise_for_status()
+
+
+async def create_share(
+    *, token: str, story_id: str, expires_at: Optional[str] = None
+) -> str:
+    if not enabled():
+        raise RuntimeError("Supabase is not configured (SUPABASE_URL/SUPABASE_ANON_KEY).")
+    payload: Dict[str, Any] = {"story_id": story_id}
+    if expires_at:
+        payload["expires_at"] = expires_at
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            _rest_url("story_shares"),
+            headers={**_headers(token), "Prefer": "return=representation"},
+            json=payload,
+        )
+        resp.raise_for_status()
+        rows = resp.json() or []
+        row = rows[0] if rows else {}
+        return str(row.get("token", ""))
+
+
+async def get_story_report(*, token: str, story_id: str) -> Optional[Dict[str, Any]]:
+    if not enabled():
+        raise RuntimeError("Supabase is not configured (SUPABASE_URL/SUPABASE_ANON_KEY).")
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(
+            _rest_url("story_reports"),
+            headers=_headers(token),
+            params={"story_id": f"eq.{story_id}", "select": "report"},
+        )
+        resp.raise_for_status()
+        rows = resp.json() or []
+        if not rows:
+            return None
+        return rows[0].get("report")
+
+
+async def upsert_story_report(
+    *, token: str, story_id: str, report: Dict[str, Any]
+) -> Dict[str, Any]:
+    if not enabled():
+        raise RuntimeError("Supabase is not configured (SUPABASE_URL/SUPABASE_ANON_KEY).")
+    payload = {"story_id": story_id, "report": report}
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            _rest_url("story_reports"),
+            headers={
+                **_headers(token),
+                "Prefer": "resolution=merge-duplicates,return=representation",
+            },
+            params={"on_conflict": "story_id"},
+            json=payload,
+        )
+        resp.raise_for_status()
+        rows = resp.json() or []
+        row = rows[0] if rows else {}
+        return row.get("report") or report
+
+
+async def get_story_learning(
+    *, token: str, story_id: str
+) -> Optional[Dict[str, Any]]:
+    if not enabled():
+        raise RuntimeError("Supabase is not configured (SUPABASE_URL/SUPABASE_ANON_KEY).")
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(
+            _rest_url("story_learning"),
+            headers=_headers(token),
+            params={
+                "story_id": f"eq.{story_id}",
+                "select": "summary,questions,vocabulary",
+            },
+        )
+        resp.raise_for_status()
+        rows = resp.json() or []
+        if not rows:
+            return None
+        return {
+            "summary": rows[0].get("summary"),
+            "questions": rows[0].get("questions"),
+            "vocabulary": rows[0].get("vocabulary"),
+        }
+
+
+async def upsert_story_learning(
+    *,
+    token: str,
+    story_id: str,
+    summary: str,
+    questions: Any,
+    vocabulary: Any,
+) -> Dict[str, Any]:
+    if not enabled():
+        raise RuntimeError("Supabase is not configured (SUPABASE_URL/SUPABASE_ANON_KEY).")
+    payload = {
+        "story_id": story_id,
+        "summary": summary,
+        "questions": questions,
+        "vocabulary": vocabulary,
+    }
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            _rest_url("story_learning"),
+            headers={
+                **_headers(token),
+                "Prefer": "resolution=merge-duplicates,return=representation",
+            },
+            params={"on_conflict": "story_id"},
+            json=payload,
+        )
+        resp.raise_for_status()
+        rows = resp.json() or []
+        row = rows[0] if rows else {}
+        return {
+            "summary": row.get("summary") or summary,
+            "questions": row.get("questions") or questions,
+            "vocabulary": row.get("vocabulary") or vocabulary,
+        }
 
 
 async def update_section(

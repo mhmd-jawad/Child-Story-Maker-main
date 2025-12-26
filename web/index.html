@@ -27,6 +27,8 @@
         Story Garden
       </div>
       <div class="top-actions">
+        <button id="studioBtn" class="ghost hidden">Story studio</button>
+        <button id="libraryBtn" class="ghost hidden">Library</button>
         <button id="profilesBtn" class="ghost hidden">Child profiles</button>
         <div id="userBadge" class="user-badge hidden"></div>
         <button id="logoutBtn" class="ghost hidden">Log out</button>
@@ -99,6 +101,17 @@
             <button type="submit" class="primary">Create profile</button>
           </form>
         </div>
+      </section>
+
+      <section id="libraryView" class="view hidden">
+        <div class="section-head">
+          <div>
+            <h2>Your story library</h2>
+            <p>Revisit favorites, share stories, or download printable copies.</p>
+          </div>
+          <button id="newStoryBtn" class="primary">New story</button>
+        </div>
+        <div id="libraryGrid" class="library-grid"></div>
       </section>
 
       <section id="studioView" class="view hidden">
@@ -193,12 +206,50 @@
               <div class="results-actions">
                 <button id="downloadZipBtn" class="ghost hidden">Download ZIP</button>
                 <button id="downloadPdfBtn" class="ghost hidden">Download PDF</button>
+                <button id="shareBtn" class="ghost hidden">Share</button>
                 <button id="regenImagesBtn" class="ghost hidden">Generate images</button>
               </div>
             </div>
-            <div id="storyOutput" class="story-output"></div>
+            <div class="story-tabs">
+              <button class="story-tab active" data-tab="story">Story</button>
+              <button class="story-tab" data-tab="report">Safety report</button>
+              <button class="story-tab" data-tab="learning">Learning pack</button>
+            </div>
+            <div id="storyPanel" class="story-output"></div>
+            <div id="reportPanel" class="panel hidden">
+              <div class="panel-head">
+                <h4>Safety & reading report</h4>
+                <p>Quick checks on reading level and kid-safe flags.</p>
+              </div>
+              <div id="reportBody" class="panel-body"></div>
+            </div>
+            <div id="learningPanel" class="panel hidden">
+              <div class="panel-head">
+                <h4>Learning pack</h4>
+                <p>Summary, questions, and vocabulary tied to the story.</p>
+              </div>
+              <button id="learningGenerateBtn" class="primary ghost-outline">
+                Generate learning pack
+              </button>
+              <div id="learningBody" class="panel-body"></div>
+            </div>
           </div>
         </div>
+      </section>
+
+      <section id="shareView" class="view hidden">
+        <div class="section-head">
+          <div>
+            <h2>Shared story</h2>
+            <p>Enjoy this story from Story Garden.</p>
+          </div>
+          <div class="results-actions">
+            <button id="shareDownloadZipBtn" class="ghost">Download ZIP</button>
+            <button id="shareDownloadPdfBtn" class="ghost">Download PDF</button>
+            <button id="openAppBtn" class="ghost">Open app</button>
+          </div>
+        </div>
+        <div id="shareOutput" class="story-output"></div>
       </section>
     </main>
 

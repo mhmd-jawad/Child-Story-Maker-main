@@ -20,26 +20,48 @@ const state = {
   children: [],
   activeChildId: localStorage.getItem(ACTIVE_CHILD_KEY) || null,
   story: null,
+  stories: [],
+  report: null,
+  learning: null,
+  shareToken: "",
+  shareStory: null,
 };
 
 const authView = document.getElementById("authView");
 const childView = document.getElementById("childView");
+const libraryView = document.getElementById("libraryView");
 const studioView = document.getElementById("studioView");
+const shareView = document.getElementById("shareView");
 const userBadge = document.getElementById("userBadge");
 const logoutBtn = document.getElementById("logoutBtn");
 const profilesBtn = document.getElementById("profilesBtn");
+const libraryBtn = document.getElementById("libraryBtn");
+const studioBtn = document.getElementById("studioBtn");
 const childGrid = document.getElementById("childGrid");
 const childForm = document.getElementById("childForm");
 const toStudioBtn = document.getElementById("toStudioBtn");
 const activeChildBadge = document.getElementById("activeChildBadge");
 const storyForm = document.getElementById("storyForm");
-const storyOutput = document.getElementById("storyOutput");
+const storyPanel = document.getElementById("storyPanel");
+const reportPanel = document.getElementById("reportPanel");
+const reportBody = document.getElementById("reportBody");
+const learningPanel = document.getElementById("learningPanel");
+const learningBody = document.getElementById("learningBody");
+const learningGenerateBtn = document.getElementById("learningGenerateBtn");
 const storyStatus = document.getElementById("storyStatus");
 const downloadZipBtn = document.getElementById("downloadZipBtn");
 const downloadPdfBtn = document.getElementById("downloadPdfBtn");
+const shareBtn = document.getElementById("shareBtn");
 const regenImagesBtn = document.getElementById("regenImagesBtn");
 const chaptersValue = document.getElementById("chaptersValue");
 const toast = document.getElementById("toast");
+const libraryGrid = document.getElementById("libraryGrid");
+const newStoryBtn = document.getElementById("newStoryBtn");
+const shareOutput = document.getElementById("shareOutput");
+const shareDownloadZipBtn = document.getElementById("shareDownloadZipBtn");
+const shareDownloadPdfBtn = document.getElementById("shareDownloadPdfBtn");
+const openAppBtn = document.getElementById("openAppBtn");
+const storyTabs = document.querySelectorAll(".story-tab");
 
 function apiUrl(path) {
   if (!API_BASE) return path;
@@ -63,7 +85,9 @@ function showToast(message, tone = "dark") {
 }
 
 function setView(view) {
-  [authView, childView, studioView].forEach((el) => el.classList.add("hidden"));
+  [authView, childView, libraryView, studioView, shareView].forEach((el) =>
+    el.classList.add("hidden")
+  );
   view.classList.remove("hidden");
 }
 
@@ -72,11 +96,32 @@ function setAuthUI(loggedIn) {
     userBadge.classList.remove("hidden");
     logoutBtn.classList.remove("hidden");
     profilesBtn.classList.remove("hidden");
+    libraryBtn.classList.remove("hidden");
+    studioBtn.classList.remove("hidden");
   } else {
     userBadge.classList.add("hidden");
     logoutBtn.classList.add("hidden");
     profilesBtn.classList.add("hidden");
+    libraryBtn.classList.add("hidden");
+    studioBtn.classList.add("hidden");
   }
+}
+
+function setStoryTab(tabName) {
+  storyTabs.forEach((tab) => {
+    tab.classList.toggle("active", tab.dataset.tab === tabName);
+  });
+  storyPanel.classList.toggle("hidden", tabName !== "story");
+  reportPanel.classList.toggle("hidden", tabName !== "report");
+  learningPanel.classList.toggle("hidden", tabName !== "learning");
+}
+
+function resetStoryPanels() {
+  reportBody.innerHTML = "";
+  learningBody.innerHTML = "";
+  state.report = null;
+  state.learning = null;
+  setStoryTab("story");
 }
 
 async function bearerToken() {
@@ -135,6 +180,7 @@ async function loadSession() {
       userBadge.textContent = state.userEmail;
       setAuthUI(true);
       await loadChildren();
+      await loadLibrary();
     } catch (err) {
       setAuthUI(false);
       setView(authView);
@@ -152,6 +198,7 @@ async function loadSession() {
     userBadge.textContent = me.email;
     setAuthUI(true);
     await loadChildren();
+    await loadLibrary();
   } catch (err) {
     state.token = "";
     localStorage.removeItem(TOKEN_KEY);
@@ -273,9 +320,12 @@ function updateChaptersValue() {
 
 async function generateStory(payload) {
   storyStatus.textContent = "Generating story...";
-  storyOutput.innerHTML = "";
+  storyPanel.innerHTML = "";
+  reportBody.innerHTML = "";
+  learningBody.innerHTML = "";
   downloadZipBtn.classList.add("hidden");
   downloadPdfBtn.classList.add("hidden");
+  shareBtn.classList.add("hidden");
   regenImagesBtn.classList.add("hidden");
 
   const story = await api("/story", {
@@ -284,6 +334,7 @@ async function generateStory(payload) {
   });
   state.story = story;
   renderStory(story);
+  loadLibrary();
 }
 
 async function generateImagesPerSection(storyId, size, imageStyle) {
@@ -309,8 +360,20 @@ async function generateImagesPerSection(storyId, size, imageStyle) {
 
 function renderStory(story) {
   if (!story) return;
+  resetStoryPanels();
   storyStatus.textContent = story.title || "Story";
-  storyOutput.innerHTML = "";
+  renderStorySections(story, storyPanel);
+
+  downloadZipBtn.classList.remove("hidden");
+  downloadPdfBtn.classList.remove("hidden");
+  shareBtn.classList.remove("hidden");
+  if (story.sections && story.sections.some((s) => !s.image_url)) {
+    regenImagesBtn.classList.remove("hidden");
+  }
+}
+
+function renderStorySections(story, targetEl) {
+  targetEl.innerHTML = "";
   (story.sections || []).forEach((section) => {
     const card = document.createElement("div");
     card.className = "story-section";
@@ -325,13 +388,223 @@ function renderStory(story) {
       <p>${section.text.replace(/\n/g, "<br />")}</p>
       ${imgUrl ? `<img src="${imgUrl}" alt="Story art" />` : ""}
     `;
-    storyOutput.appendChild(card);
+    targetEl.appendChild(card);
   });
+}
 
-  downloadZipBtn.classList.remove("hidden");
-  downloadPdfBtn.classList.remove("hidden");
-  if (story.sections && story.sections.some((s) => !s.image_url)) {
-    regenImagesBtn.classList.remove("hidden");
+function formatDate(ts) {
+  if (!ts) return "";
+  const date = new Date(ts);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString();
+}
+
+async function loadLibrary() {
+  try {
+    const data = await api("/stories");
+    state.stories = data.stories || [];
+    renderLibrary();
+  } catch (err) {
+    showToast(err.message, "error");
+  }
+}
+
+function renderLibrary() {
+  libraryGrid.innerHTML = "";
+  if (!state.stories.length) {
+    libraryGrid.innerHTML = "<div class='library-empty'>No stories yet.</div>";
+    return;
+  }
+  state.stories.forEach((story) => {
+    const card = document.createElement("div");
+    card.className = "library-card";
+    const createdAt = formatDate(story.created_at);
+    const tokens = story.total_tokens ? `${story.total_tokens} tokens` : "";
+    card.innerHTML = `
+      <div class="library-head">
+        <h4>${story.title || "Untitled story"}</h4>
+        <div class="library-meta">
+          ${createdAt ? `<span>${createdAt}</span>` : ""}
+          ${story.age_group ? `<span>${story.age_group}</span>` : ""}
+          ${story.language ? `<span>${story.language}</span>` : ""}
+        </div>
+      </div>
+      <div class="library-tags">
+        ${story.style ? `<span class="badge">${story.style}</span>` : ""}
+        ${story.model ? `<span class="badge">Model: ${story.model}</span>` : ""}
+        ${tokens ? `<span class="badge">${tokens}</span>` : ""}
+      </div>
+      <div class="library-actions">
+        <button class="ghost" data-action="open">Open</button>
+        <button class="ghost" data-action="share">Share</button>
+        <button class="ghost" data-action="pdf">PDF</button>
+        <button class="ghost" data-action="zip">ZIP</button>
+        <button class="ghost" data-action="delete">Delete</button>
+      </div>
+    `;
+    card.querySelector('[data-action="open"]').addEventListener("click", async () => {
+      await openStory(story.story_id, story.child_id);
+    });
+    card.querySelector('[data-action="share"]').addEventListener("click", async () => {
+      await createShareLink(story.story_id);
+    });
+    card.querySelector('[data-action="pdf"]').addEventListener("click", () => {
+      downloadFile(`/story/${story.story_id}/export/pdf`, "story.pdf");
+    });
+    card.querySelector('[data-action="zip"]').addEventListener("click", () => {
+      downloadFile(`/story/${story.story_id}/export/zip`, "story.zip");
+    });
+    card.querySelector('[data-action="delete"]').addEventListener("click", async () => {
+      if (!confirm("Delete this story?")) return;
+      try {
+        await api(`/story/${story.story_id}`, { method: "DELETE" });
+        await loadLibrary();
+      } catch (err) {
+        showToast(err.message, "error");
+      }
+    });
+    libraryGrid.appendChild(card);
+  });
+}
+
+async function openStory(storyId, childId = null) {
+  try {
+    const story = await api(`/story/${storyId}`);
+    state.story = story;
+    if (childId) {
+      state.activeChildId = String(childId);
+      localStorage.setItem(ACTIVE_CHILD_KEY, state.activeChildId);
+      renderActiveChild();
+    }
+    renderStory(story);
+    setView(studioView);
+  } catch (err) {
+    showToast(err.message, "error");
+  }
+}
+
+async function createShareLink(storyId) {
+  try {
+    const data = await api(`/story/${storyId}/share`, { method: "POST" });
+    const shareUrl = data.share_url || "";
+    if (shareUrl && navigator.clipboard) {
+      await navigator.clipboard.writeText(shareUrl);
+      showToast("Share link copied.");
+    } else if (shareUrl) {
+      showToast(`Share link: ${shareUrl}`);
+    } else {
+      showToast("Share link created.");
+    }
+  } catch (err) {
+    showToast(err.message, "error");
+  }
+}
+
+async function loadSharedStory(token) {
+  try {
+    state.shareToken = token;
+    setAuthUI(false);
+    const data = await api(`/share/${token}`);
+    state.shareStory = data;
+    renderStorySections(data, shareOutput);
+    setView(shareView);
+  } catch (err) {
+    showToast(err.message, "error");
+    setView(authView);
+  }
+}
+
+function renderReport(report) {
+  if (!report) return;
+  const metrics = report.metrics || {};
+  const flags = report.flags || {};
+  const blockedStory = (flags.blocked_terms_in_story || []).join(", ") || "None";
+  const blockedImages =
+    (flags.blocked_terms_in_image_prompts || []).join(", ") || "None";
+  reportBody.innerHTML = `
+    <div class="report-grid">
+      <div>
+        <strong>Word count</strong>
+        <div>${metrics.word_count ?? "—"}</div>
+      </div>
+      <div>
+        <strong>Sentence count</strong>
+        <div>${metrics.sentence_count ?? "—"}</div>
+      </div>
+      <div>
+        <strong>Avg. sentence length</strong>
+        <div>${metrics.avg_sentence_words ?? "—"}</div>
+      </div>
+      <div>
+        <strong>Flesch-Kincaid grade</strong>
+        <div>${metrics.flesch_kincaid_grade ?? "—"}</div>
+      </div>
+    </div>
+    <div class="report-flags">
+      <div><strong>Story flags:</strong> ${blockedStory}</div>
+      <div><strong>Image prompt flags:</strong> ${blockedImages}</div>
+    </div>
+  `;
+}
+
+function renderLearning(learning) {
+  if (!learning) return;
+  const summary = learning.summary || "";
+  const questions = learning.questions || [];
+  const vocab = learning.vocabulary || [];
+  const qHtml = questions
+    .map(
+      (q) =>
+        `<li><strong>${q.question}</strong><div>${q.answer || ""}</div></li>`
+    )
+    .join("");
+  const vHtml = vocab
+    .map(
+      (v) =>
+        `<li><strong>${v.word}</strong>: ${v.definition}<div>${v.example || ""}</div></li>`
+    )
+    .join("");
+  learningBody.innerHTML = `
+    <div class="learning-summary">${summary || "No summary yet."}</div>
+    <div class="learning-section">
+      <h5>Questions</h5>
+      <ul>${qHtml || "<li>—</li>"}</ul>
+    </div>
+    <div class="learning-section">
+      <h5>Vocabulary</h5>
+      <ul>${vHtml || "<li>—</li>"}</ul>
+    </div>
+  `;
+}
+
+async function loadReport() {
+  if (!state.story) return;
+  if (state.report) {
+    renderReport(state.report);
+    return;
+  }
+  try {
+    const report = await api(`/story/${state.story.story_id}/report`);
+    state.report = report;
+    renderReport(report);
+  } catch (err) {
+    showToast(err.message, "error");
+  }
+}
+
+async function loadLearning() {
+  if (!state.story) return;
+  if (state.learning) {
+    renderLearning(state.learning);
+    return;
+  }
+  try {
+    const learning = await api(`/story/${state.story.story_id}/learning`);
+    state.learning = learning;
+    renderLearning(learning);
+  } catch (err) {
+    learningBody.innerHTML =
+      "<div class='muted'>No learning pack yet. Click Generate.</div>";
   }
 }
 
@@ -345,6 +618,18 @@ tabs.forEach((tab) => {
     } else {
       registerForm.classList.remove("hidden");
       loginForm.classList.add("hidden");
+    }
+  });
+});
+
+storyTabs.forEach((tab) => {
+  tab.addEventListener("click", async () => {
+    const target = tab.dataset.tab;
+    setStoryTab(target);
+    if (target === "report") {
+      await loadReport();
+    } else if (target === "learning") {
+      await loadLearning();
     }
   });
 });
@@ -504,7 +789,6 @@ storyForm.addEventListener("submit", async (event) => {
 });
 
 async function downloadFile(path, fallbackName) {
-  if (!state.story) return;
   try {
     const resp = await fetch(apiUrl(path), {
       headers: await authHeaders({ json: false }),
@@ -534,6 +818,11 @@ downloadPdfBtn.addEventListener("click", () => {
   downloadFile(`/story/${state.story.story_id}/export/pdf`, "story.pdf");
 });
 
+shareBtn.addEventListener("click", async () => {
+  if (!state.story) return;
+  await createShareLink(state.story.story_id);
+});
+
 regenImagesBtn.addEventListener("click", async () => {
   if (!state.story) return;
   try {
@@ -541,6 +830,22 @@ regenImagesBtn.addEventListener("click", async () => {
     await generateImagesPerSection(state.story.story_id, "512x512", imageStyle);
   } catch (err) {
     showToast(err.message, "error");
+  }
+});
+
+learningGenerateBtn.addEventListener("click", async () => {
+  if (!state.story) return;
+  try {
+    learningGenerateBtn.disabled = true;
+    const learning = await api(`/story/${state.story.story_id}/learning`, {
+      method: "POST",
+    });
+    state.learning = learning;
+    renderLearning(learning);
+  } catch (err) {
+    showToast(err.message, "error");
+  } finally {
+    learningGenerateBtn.disabled = false;
   }
 });
 
@@ -569,11 +874,48 @@ profilesBtn.addEventListener("click", () => {
   setView(childView);
 });
 
+libraryBtn.addEventListener("click", () => {
+  loadLibrary();
+  setView(libraryView);
+});
+
+studioBtn.addEventListener("click", () => {
+  setView(studioView);
+});
+
 toStudioBtn.addEventListener("click", () => {
   setView(studioView);
+});
+
+newStoryBtn.addEventListener("click", () => {
+  setView(studioView);
+});
+
+shareDownloadZipBtn.addEventListener("click", () => {
+  if (!state.shareToken) return;
+  downloadFile(`/share/${state.shareToken}/export/zip`, "story.zip");
+});
+
+shareDownloadPdfBtn.addEventListener("click", () => {
+  if (!state.shareToken) return;
+  downloadFile(`/share/${state.shareToken}/export/pdf`, "story.pdf");
+});
+
+openAppBtn.addEventListener("click", () => {
+  window.location.href = window.location.origin;
 });
 
 storyForm.elements["chapters"].addEventListener("input", updateChaptersValue);
 updateChaptersValue();
 
-loadSession();
+async function initApp() {
+  const params = new URLSearchParams(window.location.search);
+  const shareToken = params.get("share");
+  if (shareToken) {
+    await loadSharedStory(shareToken);
+    return;
+  }
+  await loadSession();
+}
+
+initApp();

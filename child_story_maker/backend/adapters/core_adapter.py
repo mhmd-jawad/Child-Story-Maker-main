@@ -153,6 +153,28 @@ def _build_story_prompt(
 def _responses_available(client: OpenAI) -> bool:
     return hasattr(client, "responses")
 
+def _usage_from_response(resp: Any, model: str) -> Dict[str, Any]:
+    usage = getattr(resp, "usage", None)
+    input_tokens = None
+    output_tokens = None
+    total_tokens = None
+    if usage:
+        input_tokens = getattr(usage, "input_tokens", None)
+        output_tokens = getattr(usage, "output_tokens", None)
+        total_tokens = getattr(usage, "total_tokens", None)
+        if input_tokens is None:
+            input_tokens = getattr(usage, "prompt_tokens", None)
+        if output_tokens is None:
+            output_tokens = getattr(usage, "completion_tokens", None)
+        if total_tokens is None:
+            total_tokens = getattr(usage, "total_tokens", None)
+    return {
+        "model": getattr(resp, "model", None) or model,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+    }
+
 def _image_model_candidates() -> list[str]:
     models = []
     for model in [IMAGE_MODEL] + IMAGE_FALLBACK_MODELS + ["dall-e-2"]:
@@ -447,6 +469,7 @@ async def generate_story_core(
 
             data = _safe_json_load(raw_json)
             data = _normalize_story_data(data, sections, raw_text=raw_json)
+            data["_meta"] = _usage_from_response(resp, TEXT_MODEL)
 
             if "sections" in data:
                 for i, sec in enumerate(data["sections"], start=1):

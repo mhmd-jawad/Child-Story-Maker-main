@@ -19,6 +19,8 @@ This project deploys as:
 3. Go to **Authentication** → enable **Email** provider (default).
 4. Go to **Storage** → create a bucket named `story-media`.
    - Set the bucket to **Public** (so the web UI can display image URLs).
+   - If you made tables manually earlier and inserts fail with `null value in column "user_id"`, re-run the schema or set the default:
+     - `alter table public.children alter column user_id set default auth.uid();`
 5. Go to **Project Settings → API** and copy:
    - Project URL
    - `anon` public key

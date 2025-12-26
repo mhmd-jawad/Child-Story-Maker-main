@@ -1,6 +1,7 @@
 # child_story_maker/backend/app.py
 import os
 import uuid
+from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
 
 import httpx
@@ -21,14 +22,17 @@ from .adapters.core_adapter import (
     generate_story_core,
     generate_image_core,
 )
+from .adapters.learning_adapter import generate_learning_pack
 from .storage.files import (
     ensure_media_dir,
     save_image_bytes,
     save_audio_bytes,
 )
 from .storage import supabase_db
+from .storage import supabase_admin
 from .services.tts import synthesize_tts
 from .exports import export_zip, export_pdf
+from child_story_maker.common.evaluation import build_story_report
 from child_story_maker.common.db import (
     init_db,
     create_parent,
@@ -82,6 +86,9 @@ def _require_local_db() -> None:
 # story_id -> {"title": str, "sections": [...], "status": str}
 # -------------------------------
 DB: Dict[str, Dict[str, Any]] = {}
+SHARE_DB: Dict[str, Dict[str, Any]] = {}
+LEARNING_DB: Dict[str, Dict[str, Any]] = {}
+REPORT_DB: Dict[str, Dict[str, Any]] = {}
 
 
 # -------------------------------
@@ -179,6 +186,25 @@ def _require_bearer_token(request: Request) -> str:
     if len(parts) == 2 and parts[0].lower() == "bearer" and parts[1].strip():
         return parts[1].strip()
     raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _build_share_url(request: Request, token: str) -> str:
+    base = str(request.base_url).rstrip("/")
+    if base.endswith("/api"):
+        base = base[: -4]
+    return f"{base}/?share={token}"
+
+
+def _expires_at_from_days(days: Optional[int]) -> Optional[str]:
+    if not days:
+        return None
+    try:
+        days_int = int(days)
+    except Exception:
+        return None
+    if days_int <= 0:
+        return None
+    return (datetime.now(timezone.utc) + timedelta(days=days_int)).isoformat()
 
 # -------------------------------
 # Routes
@@ -284,6 +310,7 @@ async def create_story(req: CreateStoryReq, request: Request):
         raise HTTPException(status_code=502, detail=f"Story provider error: {e}")
 
     try:
+        story_meta = story.pop("_meta", {}) if isinstance(story, dict) else {}
         # Normalize sections for the UI layer
         norm_sections: List[Dict[str, Any]] = [
             {
@@ -310,6 +337,7 @@ async def create_story(req: CreateStoryReq, request: Request):
                 style=req.style or "default",
                 child_id=req.child_id,
                 sections=norm_sections,
+                usage=story_meta,
             )
         except httpx.HTTPError as e:
             raise HTTPException(status_code=502, detail=f"Supabase error: {e}") from e
@@ -318,6 +346,7 @@ async def create_story(req: CreateStoryReq, request: Request):
         status = "ready"
     else:
         story_id = f"st_{uuid.uuid4().hex[:8]}"
+        created_at = datetime.now(timezone.utc).isoformat()
         DB[story_id] = {
             "title": req.title.strip() or story["title"],
             "sections": norm_sections,
@@ -325,6 +354,12 @@ async def create_story(req: CreateStoryReq, request: Request):
             "age_group": req.age,
             "language": req.language,
             "style": req.style or "default",
+            "child_id": req.child_id,
+            "created_at": created_at,
+            "model": story_meta.get("model"),
+            "input_tokens": story_meta.get("input_tokens"),
+            "output_tokens": story_meta.get("output_tokens"),
+            "total_tokens": story_meta.get("total_tokens"),
         }
         status = "ready"
 
@@ -384,6 +419,283 @@ async def get_story(story_id: str, request: Request):
         "sections": data["sections"],
         "status": data["status"],
     }
+
+
+@app.get("/stories")
+async def list_stories(request: Request, child_id: Optional[str] = None):
+    use_supabase = (not USE_LOCAL_DB) and supabase_db.enabled()
+    if use_supabase:
+        token = _require_bearer_token(request)
+        rows = await supabase_db.list_stories(token=token, child_id=child_id)
+        stories = [
+            {
+                "story_id": r.get("id"),
+                "title": r.get("title"),
+                "created_at": r.get("created_at"),
+                "child_id": r.get("child_id"),
+                "age_group": r.get("age_group"),
+                "language": r.get("language"),
+                "style": r.get("style"),
+                "model": r.get("model"),
+                "input_tokens": r.get("input_tokens"),
+                "output_tokens": r.get("output_tokens"),
+                "total_tokens": r.get("total_tokens"),
+            }
+            for r in (rows or [])
+        ]
+        return {"stories": stories}
+
+    stories = []
+    for story_id, data in DB.items():
+        if child_id and str(data.get("child_id")) != str(child_id):
+            continue
+        stories.append(
+            {
+                "story_id": story_id,
+                "title": data.get("title"),
+                "created_at": data.get("created_at"),
+                "child_id": data.get("child_id"),
+                "age_group": data.get("age_group"),
+                "language": data.get("language"),
+                "style": data.get("style"),
+                "model": data.get("model"),
+                "input_tokens": data.get("input_tokens"),
+                "output_tokens": data.get("output_tokens"),
+                "total_tokens": data.get("total_tokens"),
+            }
+        )
+    stories.sort(key=lambda s: s.get("created_at") or "", reverse=True)
+    return {"stories": stories}
+
+
+@app.delete("/story/{story_id}")
+async def delete_story(story_id: str, request: Request):
+    use_supabase = (not USE_LOCAL_DB) and supabase_db.enabled()
+    if use_supabase:
+        token = _require_bearer_token(request)
+        await supabase_db.delete_story(token=token, story_id=story_id)
+        return {"ok": True}
+    if story_id in DB:
+        DB.pop(story_id, None)
+        for token, share in list(SHARE_DB.items()):
+            if share.get("story_id") == story_id:
+                SHARE_DB.pop(token, None)
+        LEARNING_DB.pop(story_id, None)
+        REPORT_DB.pop(story_id, None)
+        return {"ok": True}
+    raise HTTPException(status_code=404, detail="Story not found")
+
+
+@app.post("/story/{story_id}/share")
+async def create_share(story_id: str, request: Request, expires_in_days: Optional[int] = None):
+    use_supabase = (not USE_LOCAL_DB) and supabase_db.enabled()
+    expires_at = _expires_at_from_days(expires_in_days)
+    if use_supabase:
+        token = _require_bearer_token(request)
+        share_token = await supabase_db.create_share(
+            token=token, story_id=story_id, expires_at=expires_at
+        )
+        if not share_token:
+            raise HTTPException(status_code=502, detail="Failed to create share token.")
+        return {
+            "token": share_token,
+            "share_url": _build_share_url(request, share_token),
+        }
+
+    if story_id not in DB:
+        raise HTTPException(status_code=404, detail="Story not found")
+    share_token = uuid.uuid4().hex
+    SHARE_DB[share_token] = {"story_id": story_id, "expires_at": expires_at}
+    return {"token": share_token, "share_url": _build_share_url(request, share_token)}
+
+
+@app.get("/share/{token}", response_model=StoryResp)
+async def get_share_story(token: str):
+    use_supabase = (not USE_LOCAL_DB) and supabase_db.enabled()
+    if use_supabase:
+        if not supabase_admin.enabled():
+            raise HTTPException(status_code=503, detail="Share access not configured.")
+        data = await supabase_admin.get_story_by_share_token(token)
+        if not data:
+            raise HTTPException(status_code=404, detail="Share not found")
+        return {
+            "story_id": data["story_id"],
+            "title": data["title"],
+            "sections": data["sections"],
+            "status": data["status"],
+        }
+
+    share = SHARE_DB.get(token)
+    if not share:
+        raise HTTPException(status_code=404, detail="Share not found")
+    expires_at = share.get("expires_at")
+    if expires_at:
+        try:
+            if datetime.fromisoformat(expires_at) < datetime.now(timezone.utc):
+                raise HTTPException(status_code=404, detail="Share expired")
+        except ValueError:
+            pass
+    story_id = share.get("story_id")
+    data = DB.get(story_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Story not found")
+    return {
+        "story_id": story_id,
+        "title": data["title"],
+        "sections": data["sections"],
+        "status": data["status"],
+    }
+
+
+@app.get("/share/{token}/export/zip")
+async def export_share_zip(token: str):
+    use_supabase = (not USE_LOCAL_DB) and supabase_db.enabled()
+    if use_supabase:
+        if not supabase_admin.enabled():
+            raise HTTPException(status_code=503, detail="Share access not configured.")
+        data = await supabase_admin.get_story_by_share_token(token)
+        if not data:
+            raise HTTPException(status_code=404, detail="Share not found")
+    else:
+        share = SHARE_DB.get(token)
+        if not share:
+            raise HTTPException(status_code=404, detail="Share not found")
+        data = DB.get(share.get("story_id"))
+        if not data:
+            raise HTTPException(status_code=404, detail="Story not found")
+
+    story_id = data.get("story_id") if isinstance(data, dict) else None
+    if not story_id and not use_supabase:
+        story_id = share.get("story_id")
+    zip_bytes = export_zip(story_id or "shared_story", data)
+    filename = f"{data.get('title', 'story').replace(' ', '_').lower()}_story.zip"
+    return Response(
+        zip_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@app.get("/share/{token}/export/pdf")
+async def export_share_pdf(token: str):
+    use_supabase = (not USE_LOCAL_DB) and supabase_db.enabled()
+    if use_supabase:
+        if not supabase_admin.enabled():
+            raise HTTPException(status_code=503, detail="Share access not configured.")
+        data = await supabase_admin.get_story_by_share_token(token)
+        if not data:
+            raise HTTPException(status_code=404, detail="Share not found")
+    else:
+        share = SHARE_DB.get(token)
+        if not share:
+            raise HTTPException(status_code=404, detail="Share not found")
+        data = DB.get(share.get("story_id"))
+        if not data:
+            raise HTTPException(status_code=404, detail="Story not found")
+
+    story_id = data.get("story_id") if isinstance(data, dict) else None
+    if not story_id and not use_supabase:
+        story_id = share.get("story_id")
+    pdf_bytes = export_pdf(story_id or "shared_story", data)
+    filename = f"{data.get('title', 'story').replace(' ', '_').lower()}.pdf"
+    return Response(
+        pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@app.get("/story/{story_id}/report")
+async def story_report(story_id: str, request: Request, refresh: bool = False):
+    use_supabase = (not USE_LOCAL_DB) and supabase_db.enabled()
+    data = None
+    if use_supabase:
+        token = _require_bearer_token(request)
+        if not refresh:
+            existing = await supabase_db.get_story_report(token=token, story_id=story_id)
+            if existing:
+                return existing
+        data = await supabase_db.get_story(token=token, story_id=story_id)
+    else:
+        if not refresh and story_id in REPORT_DB:
+            return REPORT_DB[story_id]
+        data = DB.get(story_id)
+
+    if not data:
+        raise HTTPException(status_code=404, detail="Story not found")
+
+    report = build_story_report(
+        story_id=story_id,
+        title=data.get("title", "Story"),
+        age_group=data.get("age_group", ""),
+        language=data.get("language", ""),
+        style=data.get("style", ""),
+        sections=data.get("sections", []),
+    )
+    if use_supabase:
+        await supabase_db.upsert_story_report(token=token, story_id=story_id, report=report)
+    else:
+        REPORT_DB[story_id] = report
+    return report
+
+
+@app.get("/story/{story_id}/learning")
+async def get_learning(story_id: str, request: Request):
+    use_supabase = (not USE_LOCAL_DB) and supabase_db.enabled()
+    if use_supabase:
+        token = _require_bearer_token(request)
+        learning = await supabase_db.get_story_learning(token=token, story_id=story_id)
+        if not learning:
+            raise HTTPException(status_code=404, detail="Learning pack not found")
+        return learning
+
+    learning = LEARNING_DB.get(story_id)
+    if not learning:
+        raise HTTPException(status_code=404, detail="Learning pack not found")
+    return learning
+
+
+@app.post("/story/{story_id}/learning")
+async def generate_learning(story_id: str, request: Request, refresh: bool = False):
+    use_supabase = (not USE_LOCAL_DB) and supabase_db.enabled()
+    data = None
+    if use_supabase:
+        token = _require_bearer_token(request)
+        if not refresh:
+            existing = await supabase_db.get_story_learning(token=token, story_id=story_id)
+            if existing:
+                return existing
+        data = await supabase_db.get_story(token=token, story_id=story_id)
+    else:
+        if not refresh and story_id in LEARNING_DB:
+            return LEARNING_DB[story_id]
+        data = DB.get(story_id)
+
+    if not data:
+        raise HTTPException(status_code=404, detail="Story not found")
+
+    try:
+        learning = await generate_learning_pack(
+            title=data.get("title", "Story"),
+            age_group=data.get("age_group", ""),
+            language=data.get("language", ""),
+            style=data.get("style", ""),
+            sections=data.get("sections", []),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Learning provider error: {e}")
+
+    if use_supabase:
+        await supabase_db.upsert_story_learning(
+            token=token,
+            story_id=story_id,
+            summary=learning.get("summary", ""),
+            questions=learning.get("questions", []),
+            vocabulary=learning.get("vocabulary", []),
+        )
+    else:
+        LEARNING_DB[story_id] = learning
+    return learning
 
 
 @app.get("/story/{story_id}/export/zip")
